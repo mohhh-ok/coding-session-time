@@ -14,7 +14,25 @@
     "dev": "bun run src/index.ts",
     "start": "node dist/index.js",
     "test": "bun test",
+    "release": "release-it",
     "prepublishOnly": "bun test && bun run build"
+  },
+  "release-it": {
+    "git": {
+      "commitMessage": "chore: release v${version}",
+      "tagName": "v${version}",
+      "requireBranch": "main",
+      "requireCleanWorkingDir": true
+    },
+    "github": {
+      "release": true
+    },
+    "npm": {
+      "publish": true
+    },
+    "hooks": {
+      "before:init": ["bun test"]
+    }
   },
   "keywords": [
     "claude",
@@ -37,6 +55,7 @@
   },
   "devDependencies": {
     "@types/bun": "^1.3.13",
+    "release-it": "^20.0.1",
     "typescript": "^6.0.3"
   }
 }
