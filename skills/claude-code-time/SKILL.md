@@ -1,26 +1,26 @@
 ---
-name: cctime
+name: claude-code-time
 description: Inspect Claude Code worktime — how long the user spent in each project, by day or as totals. Use when the user asks about their Claude Code work hours, time tracking, daily/weekly/monthly worktime, or per-project time spent. Triggers include phrasing like "how much time did I spend", "how long did I work today", "this week's worktime", "time tracking", "hours on this project". NOT for token usage, cost, or billing — this is wall-clock time only.
 ---
 
-# cctime
+# claude-code-time
 
-`cctime` is a CLI that reads session transcripts from `~/.claude/projects/` and reports how much time the user spent in each project, broken down by day and as totals. Time is computed by clustering activity events (user prompts plus assistant turns and tool results) within an idle threshold (default 10m) and adding a tail per cluster (default 1m). Using assistant turns as activity signal means long autonomous tasks aren't misclassified as idle time.
+`claude-code-time` is a CLI that reads session transcripts from `~/.claude/projects/` and reports how much time the user spent in each project, broken down by day and as totals. Time is computed by clustering activity events (user prompts plus assistant turns and tool results) within an idle threshold (default 10m) and adding a tail per cluster (default 1m). Using assistant turns as activity signal means long autonomous tasks aren't misclassified as idle time.
 
 ## When to use
 
 Use when the user asks anything about how much time they spent using Claude Code: today, this week, last month, on a specific project, etc. Always prefer this over guessing or asking the user to count manually.
 
 Do NOT use for:
-- Token usage, API costs, or billing — cctime measures wall-clock time only.
-- Real-time monitoring — cctime reads a static history file.
+- Token usage, API costs, or billing — `claude-code-time` measures wall-clock time only.
+- Real-time monitoring — `claude-code-time` reads a static history file.
 
 ## How to invoke
 
-Always use `--json` so you can parse the output. The `cctime` binary should be on PATH after `npm i -g cctime`; if it isn't, fall back to `npx cctime`.
+Always use `--json` so you can parse the output. The `claude-code-time` binary should be on PATH after `npm i -g claude-code-time`; if it isn't, fall back to `npx claude-code-time`.
 
 ```bash
-cctime --json [flags]
+claude-code-time --json [flags]
 ```
 
 JSON shape — array of rows, one per (date, project):
@@ -54,7 +54,7 @@ Filtering / shaping:
 ## Workflow
 
 1. Pick the narrowest range flag that matches the user's question (`--today`, `--this-week`, `--days 30`, etc.). Don't dump 14 days when they asked about today.
-2. Run `cctime --json <flags>` and parse the array.
+2. Run `claude-code-time --json <flags>` and parse the array.
 3. Aggregate / sort as needed:
    - Total seconds across rows for a grand total.
    - Group by `project` for per-project totals.
@@ -65,16 +65,16 @@ Filtering / shaping:
 ## Examples
 
 User: "How much did I work today?"
-→ `cctime --today --json` → sum `seconds` → "2h32m today (148 prompts)."
+→ `claude-code-time --today --json` → sum `seconds` → "2h32m today (148 prompts)."
 
 User: "How long did I spend on this project last week?"
-→ `cctime --last-week --here --json` → sum → "6h12m on this project last week."
+→ `claude-code-time --last-week --here --json` → sum → "6h12m on this project last week."
 
 User: "Top projects this month"
-→ `cctime --this-month --total --top 5 --json` → already aggregated by project, sort by `seconds` desc → list top 5.
+→ `claude-code-time --this-month --total --top 5 --json` → already aggregated by project, sort by `seconds` desc → list top 5.
 
 User: "Daily breakdown for the last 30 days"
-→ `cctime --days 30 --json` → group by `date` → daily list.
+→ `claude-code-time --days 30 --json` → group by `date` → daily list.
 
 ## Notes
 

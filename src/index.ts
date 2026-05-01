@@ -265,7 +265,7 @@ function printText(rows: Row[], opts: { total: boolean; top?: number; days: numb
 function main() {
   const program = new Command();
   program
-    .name("cctime")
+    .name("claude-code-time")
     .description("Time analytics for Claude Code — see how much time you spent in each project.")
     .version("0.1.0")
     .option("--days <n>", "last N days", (v) => Number(v), 14)
