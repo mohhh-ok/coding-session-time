@@ -1,6 +1,6 @@
 {
   "name": "claude-code-time",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Time analytics for Claude Code — see how much time you spent in each project.",
   "type": "module",
   "bin": {
@@ -31,7 +31,9 @@
       "publish": true
     },
     "hooks": {
-      "before:init": ["bun test"]
+      "before:init": [
+        "bun test"
+      ]
     }
   },
   "keywords": [
