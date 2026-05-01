@@ -13,7 +13,8 @@
     "build": "bun build src/index.ts --outdir dist --target node --format esm --banner '#!/usr/bin/env node' && chmod +x dist/index.js",
     "dev": "bun run src/index.ts",
     "start": "node dist/index.js",
-    "prepublishOnly": "bun run build"
+    "test": "bun test",
+    "prepublishOnly": "bun test && bun run build"
   },
   "keywords": [
     "claude",

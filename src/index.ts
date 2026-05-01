@@ -1,15 +1,16 @@
 import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import pc from "picocolors";
 
-type Event = { ts: number; project: string };
-type Row = { date: string; project: string; prompts: number; seconds: number };
+export type Event = { ts: number; project: string };
+export type Row = { date: string; project: string; prompts: number; seconds: number };
 
 const DEFAULT_HISTORY = join(homedir(), ".claude", "history.jsonl");
 
-function parseDuration(input: string, fallbackUnit: "s" | "m" = "s"): number {
+export function parseDuration(input: string, fallbackUnit: "s" | "m" = "s"): number {
   const m = input.trim().match(/^(\d+(?:\.\d+)?)([smh]?)$/i);
   if (!m) throw new Error(`invalid duration: ${input}`);
   const n = Number(m[1]);
@@ -40,7 +41,7 @@ function dateKey(ts: number, tz: string): string {
   return new Date(ts * 1000).toLocaleDateString("en-CA", { timeZone: tz });
 }
 
-function aggregate(events: Event[], idleSec: number, tailSec: number, tz: string): Row[] {
+export function aggregate(events: Event[], idleSec: number, tailSec: number, tz: string): Row[] {
   const buckets = new Map<string, { date: string; project: string; tss: number[] }>();
   for (const e of events) {
     const d = dateKey(e.ts, tz);
@@ -84,19 +85,20 @@ function weekdayIndex(ymd: string): number {
   return (dow + 6) % 7;
 }
 
-function resolveRange(opts: {
-  since?: string;
-  until?: string;
-  days?: number;
-  today?: boolean;
-  yesterday?: boolean;
-  thisWeek?: boolean;
-  lastWeek?: boolean;
-  thisMonth?: boolean;
-  lastMonth?: boolean;
-  tz: string;
-}): { since: string; until: string } {
-  const today = todayInTz(opts.tz);
+export function resolveRange(
+  opts: {
+    since?: string;
+    until?: string;
+    days?: number;
+    today?: boolean;
+    yesterday?: boolean;
+    thisWeek?: boolean;
+    lastWeek?: boolean;
+    thisMonth?: boolean;
+    lastMonth?: boolean;
+  },
+  today: string,
+): { since: string; until: string } {
   if (opts.today) return { since: today, until: today };
   if (opts.yesterday) {
     const y = shiftDate(today, -1);
@@ -217,7 +219,7 @@ function main() {
     .option("--total", "skip daily breakdown, project totals only")
     .option("--top <n>", "show only top N projects in totals", (v) => Number(v))
     .option("--json", "JSON output")
-    .option("--tz <tz>", "timezone (e.g. Asia/Tokyo)", process.env.TZ ?? "Asia/Tokyo")
+    .option("--tz <tz>", "timezone (e.g. Asia/Tokyo)", process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone)
     .option("--path <path>", "path to history.jsonl", DEFAULT_HISTORY)
     .parse(process.argv);
 
@@ -255,8 +257,7 @@ function main() {
     events = events.filter((e) => e.project.includes(needle));
   }
 
-  const rangeOpts = { ...o, tz: o.tz };
-  const { since, until } = resolveRange(rangeOpts);
+  const { since, until } = resolveRange(o, todayInTz(o.tz));
   const rows = aggregate(events, idleSec, tailSec, o.tz).filter((r) => r.date >= since && r.date <= until);
 
   if (o.json) {
@@ -268,4 +269,4 @@ function main() {
   printText(rows, { total: !!o.total, top: o.top, days: o.days, rangeLabel });
 }
 
-main();
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main();
