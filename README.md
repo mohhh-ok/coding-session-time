@@ -6,7 +6,18 @@ Time analytics for Claude Code — see how much time you spent in each project.
 
 This is **not** a token-usage or cost tracker — for that, see [`ccusage`](https://www.npmjs.com/package/ccusage).
 
-## Install / Usage
+## Use it from Claude Code (recommended)
+
+This repo ships a [Claude Code skill](https://skills.sh/) so an agent can answer worktime questions for you (e.g. "how much did I work today?", "top projects this month"). Install it with [`npx skills`](https://www.npmjs.com/package/skills):
+
+```bash
+npx skills add mohhh-ok/claude-code-time         # project scope
+npx skills add mohhh-ok/claude-code-time -g      # global (user scope)
+```
+
+The skill calls the `claude-code-time` CLI under the hood, so install it too (`npm i -g claude-code-time`) — or it will fall back to `npx claude-code-time`.
+
+## Install / Usage (CLI directly)
 
 ```bash
 npx claude-code-time
@@ -69,17 +80,6 @@ Caveats:
 | `--json` | JSON output |
 | `--tz <tz>` | Timezone (defaults to `$TZ`, then the system timezone) |
 | `--projects-dir <path>` | Path to the `~/.claude/projects` directory |
-
-## Skill for Claude Code
-
-This repo ships a [Claude Code skill](https://skills.sh/) that teaches an agent when and how to invoke `claude-code-time` to answer worktime questions. Install it with [`npx skills`](https://www.npmjs.com/package/skills):
-
-```bash
-npx skills add mohhh-ok/claude-code-time         # project scope
-npx skills add mohhh-ok/claude-code-time -g      # global (user scope)
-```
-
-The skill assumes `claude-code-time` is on PATH (`npm i -g claude-code-time`) and falls back to `npx claude-code-time` otherwise.
 
 ## Acknowledgements
 
