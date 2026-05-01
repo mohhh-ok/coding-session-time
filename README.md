@@ -70,6 +70,22 @@ Caveats:
 | `--tz <tz>` | Timezone (defaults to `$TZ`, then the system timezone) |
 | `--projects-dir <path>` | Path to the `~/.claude/projects` directory |
 
+## Skills for Claude Code
+
+This repo also ships [Claude Code skills](https://skills.sh/) that let an agent invoke `cctime` and run a release on your behalf. Install them with [`npx skills`](https://www.npmjs.com/package/skills):
+
+```bash
+npx skills add mohhh-ok/cctime                          # install both skills (project scope)
+npx skills add mohhh-ok/cctime -g                       # install globally (user scope)
+npx skills add mohhh-ok/cctime --skill cctime           # only the cctime usage skill
+npx skills add mohhh-ok/cctime --skill npm-release      # only the release skill
+```
+
+Available skills:
+
+- **cctime** — describes when and how an agent should call the `cctime` CLI to answer worktime questions. Requires `cctime` to be installed (`npm i -g cctime`).
+- **npm-release** — a generic npm release workflow (preflight → tests → version bump → publish → push tag). Reusable for any npm package, not just this one.
+
 ## Acknowledgements
 
 Inspired by [ccusage](https://github.com/ryoppippi/ccusage).
