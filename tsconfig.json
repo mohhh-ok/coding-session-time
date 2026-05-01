@@ -4,6 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["ES2022"],
+    "types": ["bun"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -11,6 +12,7 @@
     "isolatedModules": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
+    "rootDir": "src",
     "outDir": "dist",
     "declaration": false,
     "sourceMap": false
