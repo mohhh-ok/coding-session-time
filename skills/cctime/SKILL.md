@@ -43,6 +43,7 @@ Range (pick at most one):
 - `--since <YYYY-MM-DD> --until <YYYY-MM-DD>` — explicit range
 
 Filtering / shaping:
+- `--here` — filter to the current working directory's project (matches the deepest session start dir that is an ancestor of cwd). Use this when the user asks about "this project" / "this repo" / "the project I'm in".
 - `--project <substring>` — filter by substring of project path
 - `--total` — skip the daily breakdown, return project totals only
 - `--top <n>` — keep only top N projects in totals
@@ -67,7 +68,7 @@ User: "How much did I work today?"
 → `cctime --today --json` → sum `seconds` → "2h32m today (148 prompts)."
 
 User: "How long did I spend on this project last week?"
-→ `cctime --last-week --project <basename of cwd> --json` → sum → "6h12m on this project last week."
+→ `cctime --last-week --here --json` → sum → "6h12m on this project last week."
 
 User: "Top projects this month"
 → `cctime --this-month --total --top 5 --json` → already aggregated by project, sort by `seconds` desc → list top 5.

@@ -278,6 +278,7 @@ function main() {
     .option("--this-month", "this month")
     .option("--last-month", "last month")
     .option("--project <pattern>", "filter by substring of project path")
+    .option("--here", "filter to the current working directory's project")
     .option("--idle <dur>", "idle threshold (e.g. 600, 10m, 1h)", "10m")
     .option("--tail <dur>", "tail seconds added per prompt (e.g. 60, 1m)", "1m")
     .option("--total", "skip daily breakdown, project totals only")
@@ -298,6 +299,7 @@ function main() {
     thisMonth?: boolean;
     lastMonth?: boolean;
     project?: string;
+    here?: boolean;
     idle: string;
     tail: string;
     total?: boolean;
@@ -320,6 +322,16 @@ function main() {
   if (o.project) {
     const needle = o.project;
     events = events.filter((e) => e.project.includes(needle));
+  }
+  if (o.here) {
+    const cwd = process.cwd();
+    let best: string | null = null;
+    for (const e of events) {
+      if (e.project === cwd || cwd.startsWith(e.project + "/")) {
+        if (!best || e.project.length > best.length) best = e.project;
+      }
+    }
+    events = best ? events.filter((e) => e.project === best) : [];
   }
 
   const rows = aggregate(events, idleSec, tailSec, o.tz);

@@ -30,6 +30,7 @@ cctime --this-week
 cctime --last-week
 cctime --this-month
 cctime --since 2026-04-01 --until 2026-04-30
+cctime --here                     # filter to the current project (or its ancestor session)
 cctime --project billionclips     # filter by substring of the project path
 cctime --idle 5m                  # treat 5+ min gaps as idle (focus-time mode)
 cctime --total --top 5            # skip daily breakdown, show top 5 projects
@@ -60,6 +61,7 @@ Caveats:
 | `--this-week` / `--last-week` | Shortcut (week starts Monday) |
 | `--this-month` / `--last-month` | Shortcut |
 | `--project <pattern>` | Filter by substring of the project path |
+| `--here` | Filter to the current working directory's project (matches the deepest session start dir that is an ancestor of cwd) |
 | `--idle <dur>` | Idle threshold (`600`, `10m`, `1h`) |
 | `--tail <dur>` | Tail seconds added per cluster |
 | `--total` | Skip daily breakdown, project totals only |
