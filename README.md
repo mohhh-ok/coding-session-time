@@ -31,7 +31,7 @@ cctime --last-week
 cctime --this-month
 cctime --since 2026-04-01 --until 2026-04-30
 cctime --here                     # filter to the current project (or its ancestor session)
-cctime --project billionclips     # filter by substring of the project path
+cctime --project myrepo           # filter by substring of the project path
 cctime --idle 5m                  # treat 5+ min gaps as idle (focus-time mode)
 cctime --total --top 5            # skip daily breakdown, show top 5 projects
 cctime --json                     # JSON output
