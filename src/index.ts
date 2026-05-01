@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,7 +27,10 @@ function isRealUserPrompt(content: unknown): boolean {
   return false;
 }
 
-export function loadEventsFromProjects(dir: string): Event[] {
+export function loadEventsFromProjects(
+  dir: string,
+  opts?: { since?: string; until?: string; tz?: string },
+): Event[] {
   const out: Event[] = [];
   let subs: string[];
   try {
@@ -35,6 +38,14 @@ export function loadEventsFromProjects(dir: string): Event[] {
   } catch {
     return out;
   }
+  // Skip files whose mtime is more than 24h before `since`. We use UTC midnight of `since`
+  // and subtract a day of slack so any timezone could still pull events into range.
+  const sinceCutoffSec =
+    opts?.since != null ? Date.parse(opts.since + "T00:00:00Z") / 1000 - 86400 : -Infinity;
+  const tz = opts?.tz ?? "UTC";
+  const since = opts?.since;
+  const until = opts?.until;
+
   for (const sub of subs) {
     const subPath = join(dir, sub);
     let files: string[];
@@ -44,9 +55,16 @@ export function loadEventsFromProjects(dir: string): Event[] {
       continue;
     }
     for (const f of files) {
+      const filePath = join(subPath, f);
+      try {
+        const st = statSync(filePath);
+        if (st.mtimeMs / 1000 < sinceCutoffSec) continue;
+      } catch {
+        continue;
+      }
       let raw: string;
       try {
-        raw = readFileSync(join(subPath, f), "utf8");
+        raw = readFileSync(filePath, "utf8");
       } catch {
         continue;
       }
@@ -65,6 +83,11 @@ export function loadEventsFromProjects(dir: string): Event[] {
         if (typeof r.timestamp !== "string") continue;
         const ts = Date.parse(r.timestamp) / 1000;
         if (!Number.isFinite(ts)) continue;
+        if (since || until) {
+          const d = dateKey(ts, tz);
+          if (since && d < since) continue;
+          if (until && d > until) continue;
+        }
         const isUserPrompt = r.type === "user" && isRealUserPrompt(r.message?.content);
         sessionEvents.push({ ts, isUserPrompt });
       }
@@ -292,14 +315,14 @@ function main() {
   const idleSec = parseDuration(o.idle, "s");
   const tailSec = parseDuration(o.tail, "s");
 
-  let events = loadEventsFromProjects(o.projectsDir);
+  const { since, until } = resolveRange(o, todayInTz(o.tz));
+  let events = loadEventsFromProjects(o.projectsDir, { since, until, tz: o.tz });
   if (o.project) {
     const needle = o.project;
     events = events.filter((e) => e.project.includes(needle));
   }
 
-  const { since, until } = resolveRange(o, todayInTz(o.tz));
-  const rows = aggregate(events, idleSec, tailSec, o.tz).filter((r) => r.date >= since && r.date <= until);
+  const rows = aggregate(events, idleSec, tailSec, o.tz);
 
   if (o.json) {
     process.stdout.write(JSON.stringify(rows, null, 2) + "\n");
