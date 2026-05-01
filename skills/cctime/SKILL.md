@@ -5,7 +5,7 @@ description: Inspect Claude Code worktime — how long the user spent in each pr
 
 # cctime
 
-`cctime` is a CLI that reads `~/.claude/history.jsonl` and reports how much time the user spent in each project, broken down by day and as totals. Time is computed by clustering prompts within an idle threshold (default 10m) and adding a tail per prompt (default 1m).
+`cctime` is a CLI that reads session transcripts from `~/.claude/projects/` and reports how much time the user spent in each project, broken down by day and as totals. Time is computed by clustering activity events (user prompts plus assistant turns and tool results) within an idle threshold (default 10m) and adding a tail per cluster (default 1m). Using assistant turns as activity signal means long autonomous tasks aren't misclassified as idle time.
 
 ## When to use
 
@@ -79,4 +79,4 @@ User: "Daily breakdown for the last 30 days"
 
 - If the JSON array is empty, the user simply has no Claude Code activity in that range. Say so plainly; don't speculate.
 - `prompts` is a useful sanity check (very high `seconds` with very low `prompts` usually means a long idle window the algorithm couldn't split — flag it if it looks off).
-- The user's history file is at `~/.claude/history.jsonl`. Override with `--path` only if the user explicitly points to another file.
+- Session transcripts live under `~/.claude/projects/`. Override with `--projects-dir` only if the user explicitly points elsewhere.

@@ -1,14 +1,14 @@
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import pc from "picocolors";
 
-export type Event = { ts: number; project: string };
+export type Event = { ts: number; project: string; isUserPrompt: boolean };
 export type Row = { date: string; project: string; prompts: number; seconds: number };
 
-const DEFAULT_HISTORY = join(homedir(), ".claude", "history.jsonl");
+const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 
 export function parseDuration(input: string, fallbackUnit: "s" | "m" = "s"): number {
   const m = input.trim().match(/^(\d+(?:\.\d+)?)([smh]?)$/i);
@@ -18,18 +18,58 @@ export function parseDuration(input: string, fallbackUnit: "s" | "m" = "s"): num
   return unit === "h" ? n * 3600 : unit === "m" ? n * 60 : n;
 }
 
-function loadEvents(path: string): Event[] {
-  const raw = readFileSync(path, "utf8");
+function isRealUserPrompt(content: unknown): boolean {
+  if (typeof content === "string") return true;
+  if (Array.isArray(content) && content.length > 0) {
+    const first = content[0] as { type?: string } | undefined;
+    return !!first && first.type !== "tool_result";
+  }
+  return false;
+}
+
+export function loadEventsFromProjects(dir: string): Event[] {
   const out: Event[] = [];
-  for (const line of raw.split("\n")) {
-    if (!line) continue;
+  let subs: string[];
+  try {
+    subs = readdirSync(dir);
+  } catch {
+    return out;
+  }
+  for (const sub of subs) {
+    const subPath = join(dir, sub);
+    let files: string[];
     try {
-      const r = JSON.parse(line);
-      if (typeof r.timestamp === "number" && typeof r.project === "string") {
-        out.push({ ts: r.timestamp / 1000, project: r.project });
-      }
+      files = readdirSync(subPath).filter((f) => f.endsWith(".jsonl"));
     } catch {
-      /* skip malformed line */
+      continue;
+    }
+    for (const f of files) {
+      let raw: string;
+      try {
+        raw = readFileSync(join(subPath, f), "utf8");
+      } catch {
+        continue;
+      }
+      const sessionEvents: { ts: number; isUserPrompt: boolean }[] = [];
+      let project: string | null = null;
+      for (const line of raw.split("\n")) {
+        if (!line) continue;
+        let r: { type?: string; cwd?: string; timestamp?: string; message?: { content?: unknown } };
+        try {
+          r = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (project === null && typeof r.cwd === "string") project = r.cwd;
+        if (r.type !== "user" && r.type !== "assistant") continue;
+        if (typeof r.timestamp !== "string") continue;
+        const ts = Date.parse(r.timestamp) / 1000;
+        if (!Number.isFinite(ts)) continue;
+        const isUserPrompt = r.type === "user" && isRealUserPrompt(r.message?.content);
+        sessionEvents.push({ ts, isUserPrompt });
+      }
+      if (!project) continue;
+      for (const e of sessionEvents) out.push({ ts: e.ts, project, isUserPrompt: e.isUserPrompt });
     }
   }
   out.sort((a, b) => a.ts - b.ts);
@@ -42,16 +82,17 @@ function dateKey(ts: number, tz: string): string {
 }
 
 export function aggregate(events: Event[], idleSec: number, tailSec: number, tz: string): Row[] {
-  const buckets = new Map<string, { date: string; project: string; tss: number[] }>();
+  const buckets = new Map<string, { date: string; project: string; tss: number[]; promptCount: number }>();
   for (const e of events) {
     const d = dateKey(e.ts, tz);
     const key = `${d}\t${e.project}`;
     let b = buckets.get(key);
     if (!b) {
-      b = { date: d, project: e.project, tss: [] };
+      b = { date: d, project: e.project, tss: [], promptCount: 0 };
       buckets.set(key, b);
     }
     b.tss.push(e.ts);
+    if (e.isUserPrompt) b.promptCount++;
   }
   const rows: Row[] = [];
   for (const b of buckets.values()) {
@@ -62,7 +103,7 @@ export function aggregate(events: Event[], idleSec: number, tailSec: number, tz:
       secs += gap <= idleSec ? gap : tailSec;
     }
     secs += tailSec; // tail for the last prompt
-    rows.push({ date: b.date, project: b.project, prompts: b.tss.length, seconds: secs });
+    rows.push({ date: b.date, project: b.project, prompts: b.promptCount, seconds: secs });
   }
   return rows;
 }
@@ -220,7 +261,7 @@ function main() {
     .option("--top <n>", "show only top N projects in totals", (v) => Number(v))
     .option("--json", "JSON output")
     .option("--tz <tz>", "timezone (e.g. Asia/Tokyo)", process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone)
-    .option("--path <path>", "path to history.jsonl", DEFAULT_HISTORY)
+    .option("--projects-dir <path>", "path to ~/.claude/projects directory", DEFAULT_PROJECTS_DIR)
     .parse(process.argv);
 
   const o = program.opts<{
@@ -240,18 +281,18 @@ function main() {
     top?: number;
     json?: boolean;
     tz: string;
-    path: string;
+    projectsDir: string;
   }>();
 
-  if (!existsSync(o.path)) {
-    console.error(pc.red(`Not found: ${o.path}`));
+  if (!existsSync(o.projectsDir)) {
+    console.error(pc.red(`Not found: ${o.projectsDir}`));
     process.exit(1);
   }
 
   const idleSec = parseDuration(o.idle, "s");
   const tailSec = parseDuration(o.tail, "s");
 
-  let events = loadEvents(o.path);
+  let events = loadEventsFromProjects(o.projectsDir);
   if (o.project) {
     const needle = o.project;
     events = events.filter((e) => e.project.includes(needle));
