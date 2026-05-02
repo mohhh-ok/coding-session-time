@@ -17,6 +17,22 @@ npx skills add mohhh-ok/claude-code-time -g      # global (user scope)
 
 The skill calls the `claude-code-time` CLI under the hood, so install it too (`npm i -g claude-code-time`) — or it will fall back to `npx claude-code-time`.
 
+### Example prompts
+
+Once the skill is installed, you can ask Claude Code things like:
+
+```
+How much did I work today?
+How long did I spend on this project last week?
+Top 5 projects this month by time spent.
+Give me a daily breakdown for the last 30 days.
+How many hours did I put into myrepo in April?
+Compare this week vs last week.
+Was yesterday a heavy Claude Code day?
+```
+
+The skill picks the right `claude-code-time` flags (`--today`, `--this-week`, `--here`, `--project`, `--total`, etc.) based on your question and reports back a concise answer.
+
 ## Install / Usage (CLI directly)
 
 ```bash
