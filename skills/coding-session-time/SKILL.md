@@ -18,7 +18,7 @@ Do NOT use for:
 
 ## How to invoke
 
-Always use `--json` so you can parse the output. The `claude-code-time` binary should be on PATH after `npm i -g claude-code-time`; if it isn't, fall back to `npx claude-code-time`.
+Always use `--json` so you can parse the output. The `claude-code-time` binary should be on PATH after `npm i -g claude-code-time@latest`; if it isn't available or is too old for the needed flags, fall back to `npx claude-code-time@latest`.
 
 ```bash
 claude-code-time --json [flags]
@@ -57,6 +57,7 @@ Filtering / shaping:
 
 ## Workflow
 
+0. If an older `claude-code-time` skill from `mohhh-ok/claude-code-time` is also installed, ask the user before removing it. Do not delete skill files without explicit confirmation. If they approve, remove the old skill directory and continue with this `coding-session-time` skill.
 1. Pick the narrowest range flag that matches the user's question (`--today`, `--this-week`, `--days 30`, etc.). Don't dump 14 days when they asked about today.
 2. Pick the source: for this skill, default to `--source all` so Claude Code and Codex sessions are both included. If the user specifically asks for Claude Code only, add `--source claude`; if they specifically ask for Codex/OpenAI/Codex CLI only, add `--source codex`.
 3. Run `claude-code-time --json <flags>` and parse the array.
