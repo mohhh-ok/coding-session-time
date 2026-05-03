@@ -44,9 +44,9 @@ Range (pick at most one):
 - `--since <YYYY-MM-DD> --until <YYYY-MM-DD>` — explicit range
 
 Filtering / shaping:
-- `--source claude` — read Claude Code history (default)
+- `--source claude` — read Claude Code history (CLI default)
 - `--source codex` / `--codex` — read Codex history
-- `--source all` — combine Claude Code and Codex history
+- `--source all` — combine Claude Code and Codex history (skill default)
 - `--here` — filter to the current working directory's project (matches the deepest session start dir that is an ancestor of cwd). Use this when the user asks about "this project" / "this repo" / "the project I'm in".
 - `--project <substring>` — filter by substring of project path
 - `--total` — skip the daily breakdown, return project totals only
@@ -58,7 +58,7 @@ Filtering / shaping:
 ## Workflow
 
 1. Pick the narrowest range flag that matches the user's question (`--today`, `--this-week`, `--days 30`, etc.). Don't dump 14 days when they asked about today.
-2. Pick the source: default to Claude Code. If the user specifically says Codex/OpenAI/Codex CLI, add `--source codex`; if they ask for all coding-agent sessions, add `--source all`.
+2. Pick the source: for this skill, default to `--source all` so Claude Code and Codex sessions are both included. If the user specifically asks for Claude Code only, add `--source claude`; if they specifically ask for Codex/OpenAI/Codex CLI only, add `--source codex`.
 3. Run `claude-code-time --json <flags>` and parse the array.
 4. Aggregate / sort as needed:
    - Total seconds across rows for a grand total.
@@ -70,7 +70,7 @@ Filtering / shaping:
 ## Examples
 
 User: "How much did I work today?"
-→ `claude-code-time --today --json` → sum `seconds` → "2h32m today (148 prompts)."
+→ `claude-code-time --today --source all --json` → sum `seconds` → "2h32m today (148 prompts)."
 
 User: "How much did I use Codex today?"
 → `claude-code-time --today --source codex --json` → sum `seconds` → "18m in Codex today (4 prompts)."
