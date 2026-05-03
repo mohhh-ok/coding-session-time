@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { aggregate, parseDuration, resolveRange, type Event } from "./index";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { aggregate, loadEventsFromCodexSessions, parseDuration, resolveRange, type Event } from "./index";
 
 const ts = (iso: string): number => Date.parse(iso) / 1000;
 const ev = (iso: string, project: string, isUserPrompt = true): Event => ({
@@ -143,6 +146,75 @@ describe("aggregate", () => {
     const rows = aggregate(events, idle, tail, tz);
     expect(rows[0]!.seconds).toBe(40 * 30 + tail); // last - first + tail
     expect(rows[0]!.prompts).toBe(1);
+  });
+});
+
+describe("loadEventsFromCodexSessions", () => {
+  test("loads Codex rollout activity and counts only user_message prompts", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-sessions-"));
+    const dir = join(root, "2026", "05", "01");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "rollout.jsonl"),
+      [
+        {
+          timestamp: "2026-05-01T10:00:00.000Z",
+          type: "session_meta",
+          payload: { cwd: "/p" },
+        },
+        {
+          timestamp: "2026-05-01T10:00:01.000Z",
+          type: "response_item",
+          payload: { type: "message", role: "user" },
+        },
+        {
+          timestamp: "2026-05-01T10:00:02.000Z",
+          type: "event_msg",
+          payload: { type: "user_message" },
+        },
+        {
+          timestamp: "2026-05-01T10:00:03.000Z",
+          type: "response_item",
+          payload: { type: "reasoning" },
+        },
+        {
+          timestamp: "2026-05-01T10:00:04.000Z",
+          type: "response_item",
+          payload: { type: "message", role: "assistant" },
+        },
+        {
+          timestamp: "2026-05-01T10:00:05.000Z",
+          type: "event_msg",
+          payload: { type: "token_count" },
+        },
+      ]
+        .map((v) => JSON.stringify(v))
+        .join("\n"),
+    );
+
+    const events = loadEventsFromCodexSessions(root);
+    expect(events).toEqual([
+      { ts: ts("2026-05-01T10:00:02.000Z"), project: "/p", isUserPrompt: true },
+      { ts: ts("2026-05-01T10:00:03.000Z"), project: "/p", isUserPrompt: false },
+      { ts: ts("2026-05-01T10:00:04.000Z"), project: "/p", isUserPrompt: false },
+    ]);
+  });
+
+  test("filters Codex events by timezone date", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-sessions-"));
+    mkdirSync(root, { recursive: true });
+    writeFileSync(
+      join(root, "rollout.jsonl"),
+      [
+        { timestamp: "2026-05-01T23:59:00.000Z", type: "session_meta", payload: { cwd: "/p" } },
+        { timestamp: "2026-05-01T23:59:00.000Z", type: "event_msg", payload: { type: "user_message" } },
+      ]
+        .map((v) => JSON.stringify(v))
+        .join("\n"),
+    );
+
+    expect(loadEventsFromCodexSessions(root, { since: "2026-05-02", until: "2026-05-02", tz: "Asia/Tokyo" })).toHaveLength(1);
+    expect(loadEventsFromCodexSessions(root, { since: "2026-05-02", until: "2026-05-02", tz: "UTC" })).toHaveLength(0);
   });
 });
 

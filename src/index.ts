@@ -9,6 +9,8 @@ export type Event = { ts: number; project: string; isUserPrompt: boolean };
 export type Row = { date: string; project: string; prompts: number; seconds: number };
 
 const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
+const DEFAULT_CODEX_SESSIONS_DIR = join(homedir(), ".codex", "sessions");
+type Source = "claude" | "codex" | "all";
 
 export function parseDuration(input: string, fallbackUnit: "s" | "m" = "s"): number {
   const m = input.trim().match(/^(\d+(?:\.\d+)?)([smh]?)$/i);
@@ -94,6 +96,108 @@ export function loadEventsFromProjects(
       if (!project) continue;
       for (const e of sessionEvents) out.push({ ts: e.ts, project, isUserPrompt: e.isUserPrompt });
     }
+  }
+  out.sort((a, b) => a.ts - b.ts);
+  return out;
+}
+
+function listJsonlFilesRecursive(dir: string): string[] {
+  const out: string[] = [];
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    const p = join(dir, entry);
+    let st;
+    try {
+      st = statSync(p);
+    } catch {
+      continue;
+    }
+    if (st.isDirectory()) out.push(...listJsonlFilesRecursive(p));
+    else if (entry.endsWith(".jsonl")) out.push(p);
+  }
+  return out;
+}
+
+function inRange(ts: number, since: string | undefined, until: string | undefined, tz: string): boolean {
+  if (!since && !until) return true;
+  const d = dateKey(ts, tz);
+  return (!since || d >= since) && (!until || d <= until);
+}
+
+function isCodexActivityEvent(r: {
+  type?: string;
+  payload?: { type?: string; role?: string };
+}): { include: boolean; isUserPrompt: boolean } {
+  const payloadType = r.payload?.type;
+  if (r.type === "event_msg") {
+    if (payloadType === "user_message") return { include: true, isUserPrompt: true };
+    if (payloadType === "agent_message" || payloadType === "exec_command_end" || payloadType === "task_started") {
+      return { include: true, isUserPrompt: false };
+    }
+    return { include: false, isUserPrompt: false };
+  }
+  if (r.type !== "response_item") return { include: false, isUserPrompt: false };
+  if (payloadType === "message") return { include: r.payload?.role === "assistant", isUserPrompt: false };
+  if (payloadType === "reasoning" || payloadType === "function_call" || payloadType === "function_call_output") {
+    return { include: true, isUserPrompt: false };
+  }
+  return { include: false, isUserPrompt: false };
+}
+
+export function loadEventsFromCodexSessions(
+  dir: string,
+  opts?: { since?: string; until?: string; tz?: string },
+): Event[] {
+  const out: Event[] = [];
+  const sinceCutoffSec =
+    opts?.since != null ? Date.parse(opts.since + "T00:00:00Z") / 1000 - 86400 : -Infinity;
+  const tz = opts?.tz ?? "UTC";
+  const since = opts?.since;
+  const until = opts?.until;
+
+  for (const filePath of listJsonlFilesRecursive(dir)) {
+    try {
+      const st = statSync(filePath);
+      if (st.mtimeMs / 1000 < sinceCutoffSec) continue;
+    } catch {
+      continue;
+    }
+    let raw: string;
+    try {
+      raw = readFileSync(filePath, "utf8");
+    } catch {
+      continue;
+    }
+    const sessionEvents: { ts: number; isUserPrompt: boolean }[] = [];
+    let project: string | null = null;
+    for (const line of raw.split("\n")) {
+      if (!line) continue;
+      let r: {
+        type?: string;
+        timestamp?: string;
+        payload?: { type?: string; role?: string; cwd?: string };
+      };
+      try {
+        r = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (project === null && r.type === "session_meta" && typeof r.payload?.cwd === "string") {
+        project = r.payload.cwd;
+      }
+      if (typeof r.timestamp !== "string") continue;
+      const ts = Date.parse(r.timestamp) / 1000;
+      if (!Number.isFinite(ts) || !inRange(ts, since, until, tz)) continue;
+      const activity = isCodexActivityEvent(r);
+      if (activity.include) sessionEvents.push({ ts, isUserPrompt: activity.isUserPrompt });
+    }
+    if (!project) continue;
+    for (const e of sessionEvents) out.push({ ts: e.ts, project, isUserPrompt: e.isUserPrompt });
   }
   out.sort((a, b) => a.ts - b.ts);
   return out;
@@ -266,7 +370,7 @@ function main() {
   const program = new Command();
   program
     .name("claude-code-time")
-    .description("Time analytics for Claude Code — see how much time you spent in each project.")
+    .description("Time analytics for local coding-agent sessions.")
     .version("0.1.0")
     .option("--days <n>", "last N days", (v) => Number(v), 14)
     .option("--since <YYYY-MM-DD>", "range start")
@@ -285,7 +389,10 @@ function main() {
     .option("--top <n>", "show only top N projects in totals", (v) => Number(v))
     .option("--json", "JSON output")
     .option("--tz <tz>", "timezone (e.g. Asia/Tokyo)", process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone)
+    .option("--source <source>", "history source: claude, codex, or all", "claude")
+    .option("--codex", "shortcut for --source codex")
     .option("--projects-dir <path>", "path to ~/.claude/projects directory", DEFAULT_PROJECTS_DIR)
+    .option("--codex-sessions-dir <path>", "path to ~/.codex/sessions directory", DEFAULT_CODEX_SESSIONS_DIR)
     .parse(process.argv);
 
   const o = program.opts<{
@@ -306,19 +413,40 @@ function main() {
     top?: number;
     json?: boolean;
     tz: string;
+    source: string;
+    codex?: boolean;
     projectsDir: string;
+    codexSessionsDir: string;
   }>();
 
-  if (!existsSync(o.projectsDir)) {
-    console.error(pc.red(`Not found: ${o.projectsDir}`));
+  const source = (o.codex ? "codex" : o.source) as Source;
+  if (source !== "claude" && source !== "codex" && source !== "all") {
+    console.error(pc.red(`Invalid --source: ${o.source}`));
     process.exit(1);
+  }
+  const requiredDirs = [
+    ...(source === "claude" || source === "all" ? [o.projectsDir] : []),
+    ...(source === "codex" || source === "all" ? [o.codexSessionsDir] : []),
+  ];
+  for (const dir of requiredDirs) {
+    if (!existsSync(dir)) {
+      console.error(pc.red(`Not found: ${dir}`));
+      process.exit(1);
+    }
   }
 
   const idleSec = parseDuration(o.idle, "s");
   const tailSec = parseDuration(o.tail, "s");
 
   const { since, until } = resolveRange(o, todayInTz(o.tz));
-  let events = loadEventsFromProjects(o.projectsDir, { since, until, tz: o.tz });
+  let events: Event[] = [];
+  if (source === "claude" || source === "all") {
+    events.push(...loadEventsFromProjects(o.projectsDir, { since, until, tz: o.tz }));
+  }
+  if (source === "codex" || source === "all") {
+    events.push(...loadEventsFromCodexSessions(o.codexSessionsDir, { since, until, tz: o.tz }));
+  }
+  events.sort((a, b) => a.ts - b.ts);
   if (o.project) {
     const needle = o.project;
     events = events.filter((e) => e.project.includes(needle));

@@ -1,18 +1,20 @@
-# claude-code-time
+# coding-session-time
 
-Time analytics for Claude Code — see how much time you spent in each project.
+Time analytics for local coding-agent sessions.
 
-`claude-code-time` reads the session transcripts under `~/.claude/projects/` (which Claude Code writes automatically) and reports **working time** by project (the directory the session was opened in) and by day.
+`coding-session-time` reads session transcripts from Claude Code under `~/.claude/projects/` and from Codex under `~/.codex/sessions/`, then reports **working time** by project (the directory the session was opened in) and by day.
+
+It is published on npm as `claude-code-time`; the CLI command is also `claude-code-time`. It does not track normal desktop or web chat history.
 
 This is **not** a token-usage or cost tracker — for that, see [`ccusage`](https://www.npmjs.com/package/ccusage).
 
-## Use it from Claude Code (recommended)
+## Use it from Claude Code or Codex (recommended)
 
-This repo ships a [Claude Code skill](https://skills.sh/) so an agent can answer worktime questions for you (e.g. "how much did I work today?", "top projects this month"). Install it with [`npx skills`](https://www.npmjs.com/package/skills):
+This repo ships a skill so an agent can answer worktime questions for you (e.g. "how much did I work today?", "top projects this month"). Install it with [`npx skills`](https://www.npmjs.com/package/skills):
 
 ```bash
-npx skills add mohhh-ok/claude-code-time         # project scope
-npx skills add mohhh-ok/claude-code-time -g      # global (user scope)
+npx skills add mohhh-ok/coding-session-time         # project scope
+npx skills add mohhh-ok/coding-session-time -g      # global (user scope)
 ```
 
 The skill calls the `claude-code-time` CLI under the hood, so install it too (`npm i -g claude-code-time`) — or it will fall back to `npx claude-code-time`.
@@ -49,7 +51,10 @@ claude-code-time
 ## Examples
 
 ```bash
-claude-code-time                            # last 14 days, daily breakdown + project totals
+claude-code-time                            # Claude Code, last 14 days, daily breakdown + project totals
+claude-code-time --source claude            # Claude Code sessions only
+claude-code-time --source codex             # Codex sessions
+claude-code-time --source all               # Claude Code + Codex sessions
 claude-code-time --days 7
 claude-code-time --today
 claude-code-time --yesterday
@@ -95,7 +100,10 @@ Caveats:
 | `--top <n>` | Show only top N projects in totals |
 | `--json` | JSON output |
 | `--tz <tz>` | Timezone (defaults to `$TZ`, then the system timezone) |
+| `--source <source>` | History source: `claude`, `codex`, or `all` (default: `claude`) |
+| `--codex` | Shortcut for `--source codex` |
 | `--projects-dir <path>` | Path to the `~/.claude/projects` directory |
+| `--codex-sessions-dir <path>` | Path to the `~/.codex/sessions` directory |
 
 ## Acknowledgements
 

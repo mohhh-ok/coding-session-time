@@ -1,7 +1,7 @@
 {
   "name": "claude-code-time",
   "version": "0.1.1",
-  "description": "Time analytics for Claude Code — see how much time you spent in each project.",
+  "description": "Time analytics for local coding-agent sessions.",
   "type": "module",
   "bin": {
     "claude-code-time": "dist/index.js"
@@ -39,14 +39,17 @@
   "keywords": [
     "claude",
     "claude-code",
+    "codex",
     "cli",
+    "coding-agent",
+    "session",
     "time-tracking",
     "analytics"
   ],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/mohhh-ok/claude-code-time.git"
+    "url": "git+https://github.com/mohhh-ok/coding-session-time.git"
   },
   "engines": {
     "node": ">=18"
