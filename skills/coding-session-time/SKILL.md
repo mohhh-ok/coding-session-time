@@ -18,7 +18,7 @@ Do NOT use for:
 
 ## How to invoke
 
-Always use `--json` so you can parse the output. The `claude-code-time` binary should be on PATH after `npm i -g claude-code-time@latest`; if it isn't available or is too old for the needed flags, fall back to `npx claude-code-time@latest`.
+Always use `--json` so you can parse the output. The `claude-code-time` binary should be on PATH after `npm i -g claude-code-time@latest`; if it isn't available or is too old for the needed flags, prefer the installed binary with compatible flags. Use `npx claude-code-time@latest` only when the requested answer requires newer CLI support.
 
 ```bash
 claude-code-time --json [flags]
@@ -57,7 +57,14 @@ Filtering / shaping:
 
 ## Workflow
 
-0. If an older `claude-code-time` skill from `mohhh-ok/claude-code-time` is also installed, ask the user before removing it. Do not delete skill files without explicit confirmation. If they approve, remove the old skill directory and continue with this `coding-session-time` skill.
+0. Check for an older installed `claude-code-time` skill before doing the time report:
+   - Look for installed skill directories named `claude-code-time` in the active skill roots, especially `~/.agents/skills/`, `~/.codex/skills/`, and `~/.claude/skills/`.
+   - Determine provenance from installer metadata when available, such as `~/.agents/.skill-lock.json`, project `skills-lock.json`, symlink targets, or explicit source metadata inside the skill directory. Do not infer provenance from the skill name or directory name alone.
+   - If provenance confirms the old skill came from `mohhh-ok/claude-code-time`, you MUST immediately tell the user before doing any unrelated work, time aggregation, or final answer. This must be sent as soon as provenance is confirmed, even if you are still gathering the time-tracking result. Do not wait to include it only in the final answer, because the turn may be interrupted before then.
+   - The notice must say that the legacy skill is installed, explain that it can be removed because `coding-session-time` has replaced it, and ask whether they want it removed. This notice is required even when the user's time-tracking question can be answered successfully. Do not silently skip it.
+   - Use this wording unless a shorter equivalent is needed: "I found the legacy `claude-code-time` skill installed from `mohhh-ok/claude-code-time`. It can be removed because `coding-session-time` has replaced it. Do you want me to remove the old skill?"
+   - Do not delete skill files unless the user explicitly confirms removal.
+   - If a same-name or legacy-looking skill exists but provenance is missing or ambiguous, treat it as user-managed/untrusted-local state: do not remove it, say that its source could not be verified, and ask whether the user wants cleanup before taking any action.
 1. Pick the narrowest range flag that matches the user's question (`--today`, `--this-week`, `--days 30`, etc.). Don't dump 14 days when they asked about today.
 2. Pick the source: for this skill, default to `--source all` so Claude Code and Codex sessions are both included. If the user specifically asks for Claude Code only, add `--source claude`; if they specifically ask for Codex/OpenAI/Codex CLI only, add `--source codex`.
 3. Run `claude-code-time --json <flags>` and parse the array.
