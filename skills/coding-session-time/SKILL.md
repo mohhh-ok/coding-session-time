@@ -18,10 +18,10 @@ Do NOT use for:
 
 ## How to invoke
 
-Always use `--json` so you can parse the output. The `claude-code-time` binary should be on PATH after `npm i -g claude-code-time@latest`; if it isn't available or is too old for the needed flags, prefer the installed binary with compatible flags. Use `npx claude-code-time@latest` only when the requested answer requires newer CLI support.
+Always use `--json` so you can parse the output. Run the latest published CLI through `npx` instead of relying on a globally installed binary.
 
 ```bash
-claude-code-time --json [flags]
+npx claude-code-time@latest --json [flags]
 ```
 
 JSON shape — array of rows, one per (date, project):
@@ -67,7 +67,7 @@ Filtering / shaping:
    - If a same-name or legacy-looking skill exists but provenance is missing or ambiguous, treat it as user-managed/untrusted-local state: do not remove it, say that its source could not be verified, and ask whether the user wants cleanup before taking any action.
 1. Pick the narrowest range flag that matches the user's question (`--today`, `--this-week`, `--days 30`, etc.). Don't dump 14 days when they asked about today.
 2. Pick the source: for this skill, default to `--source all` so Claude Code and Codex sessions are both included. If the user specifically asks for Claude Code only, add `--source claude`; if they specifically ask for Codex/OpenAI/Codex CLI only, add `--source codex`.
-3. Run `claude-code-time --json <flags>` and parse the array.
+3. Run `npx claude-code-time@latest --json <flags>` and parse the array.
 4. Aggregate / sort as needed:
    - Total seconds across rows for a grand total.
    - Group by `project` for per-project totals.
@@ -78,19 +78,19 @@ Filtering / shaping:
 ## Examples
 
 User: "How much did I work today?"
-→ `claude-code-time --today --source all --json` → sum `seconds` → "2h32m today (148 prompts)."
+→ `npx claude-code-time@latest --today --source all --json` → sum `seconds` → "2h32m today (148 prompts)."
 
 User: "How much did I use Codex today?"
-→ `claude-code-time --today --source codex --json` → sum `seconds` → "18m in Codex today (4 prompts)."
+→ `npx claude-code-time@latest --today --source codex --json` → sum `seconds` → "18m in Codex today (4 prompts)."
 
 User: "How long did I spend on this project last week?"
-→ `claude-code-time --last-week --here --json` → sum → "6h12m on this project last week."
+→ `npx claude-code-time@latest --last-week --here --json` → sum → "6h12m on this project last week."
 
 User: "Top projects this month"
-→ `claude-code-time --this-month --total --top 5 --json` → already aggregated by project, sort by `seconds` desc → list top 5.
+→ `npx claude-code-time@latest --this-month --total --top 5 --json` → already aggregated by project, sort by `seconds` desc → list top 5.
 
 User: "Daily breakdown for the last 30 days"
-→ `claude-code-time --days 30 --json` → group by `date` → daily list.
+→ `npx claude-code-time@latest --days 30 --json` → group by `date` → daily list.
 
 ## Notes
 

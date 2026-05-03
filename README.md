@@ -17,7 +17,7 @@ npx skills add mohhh-ok/coding-session-time         # project scope
 npx skills add mohhh-ok/coding-session-time -g      # global (user scope)
 ```
 
-The skill calls the `claude-code-time` CLI under the hood, so install it too (`npm i -g claude-code-time@latest`) — or it will fall back to `npx claude-code-time@latest`.
+The skill runs `npx claude-code-time@latest` under the hood, so you do not need to install the CLI separately.
 
 ### Example prompts
 
