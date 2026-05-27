@@ -2224,7 +2224,7 @@ var import_picocolors = __toESM(require_picocolors(), 1);
 // package.json
 var package_default = {
   name: "claude-code-time",
-  version: "0.2.0",
+  version: "0.3.0",
   description: "Time analytics for local coding-agent sessions.",
   type: "module",
   bin: {
