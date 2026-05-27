@@ -18,19 +18,19 @@ Do NOT use for:
 
 ## How to invoke
 
-This skill is self-contained: it ships a prebuilt `claude-code-time` bundle at `bin/claude-code-time.js` inside this skill's directory, so it does **not** download anything at runtime. Run it with `node`, using the skill base directory shown at the top of this skill ("Base directory for this skill"), and always pass `--json` so you can parse the output:
+This skill is self-contained: it ships a prebuilt `claude-code-time` bundle at `bin/coding-session-time.js` inside this skill's directory, so it does **not** download anything at runtime. Run it with `node`, using the skill base directory shown at the top of this skill ("Base directory for this skill"), and always pass `--json` so you can parse the output:
 
 ```bash
-node "<skill base dir>/bin/claude-code-time.js" --json [flags]
+node "<skill base dir>/bin/coding-session-time.js" --json [flags]
 ```
 
 For example, when the base directory is `~/.claude/skills/coding-session-time`:
 
 ```bash
-node ~/.claude/skills/coding-session-time/bin/claude-code-time.js --today --source all --json
+node ~/.claude/skills/coding-session-time/bin/coding-session-time.js --today --source all --json
 ```
 
-Do **not** run `npx claude-code-time@latest`: the bundled binary is pinned to this skill's version, which avoids pulling unreviewed code at runtime. In the workflow and examples below, `<cli>` is shorthand for `node "<skill base dir>/bin/claude-code-time.js"`.
+Do **not** run `npx claude-code-time@latest`: the bundled binary is pinned to this skill's version, which avoids pulling unreviewed code at runtime. In the workflow and examples below, `<cli>` is shorthand for `node "<skill base dir>/bin/coding-session-time.js"`.
 
 JSON shape — array of rows, one per (date, project):
 

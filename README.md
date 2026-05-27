@@ -17,7 +17,7 @@ npx skills add mohhh-ok/coding-session-time         # project scope
 npx skills add mohhh-ok/coding-session-time -g      # global (user scope)
 ```
 
-The skill is **self-contained**: it ships a prebuilt `claude-code-time` bundle (`bin/claude-code-time.js`) pinned to the skill's version and runs it with `node`. It does not download anything at runtime, so there is no `npx @latest` step that could pull unreviewed code. You do not need to install the CLI separately.
+The skill is **self-contained**: it ships a prebuilt `claude-code-time` bundle (`bin/coding-session-time.js`) pinned to the skill's version and runs it with `node`. It does not download anything at runtime, so there is no `npx @latest` step that could pull unreviewed code. You do not need to install the CLI separately.
 
 You do not need the npm package — it is deprecated (see below).
 

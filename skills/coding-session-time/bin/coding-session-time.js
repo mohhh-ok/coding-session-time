@@ -2236,7 +2236,7 @@ var package_default = {
   scripts: {
     build: "bun run build:npm && bun run build:skill",
     "build:npm": "bun build src/index.ts --outdir dist --target node --format esm --banner '#!/usr/bin/env node' && chmod +x dist/index.js",
-    "build:skill": "bun build src/index.ts --outfile skills/coding-session-time/bin/claude-code-time.js --target node --format esm --banner '#!/usr/bin/env node' && chmod +x skills/coding-session-time/bin/claude-code-time.js",
+    "build:skill": "bun build src/index.ts --outfile skills/coding-session-time/bin/coding-session-time.js --target node --format esm --banner '#!/usr/bin/env node' && chmod +x skills/coding-session-time/bin/coding-session-time.js",
     dev: "bun run src/index.ts",
     start: "node dist/index.js",
     test: "bun test",
@@ -2262,7 +2262,7 @@ var package_default = {
       ],
       "after:bump": [
         "bun run build:skill",
-        "git add skills/coding-session-time/bin/claude-code-time.js"
+        "git add skills/coding-session-time/bin/coding-session-time.js"
       ]
     }
   },
