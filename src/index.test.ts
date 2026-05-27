@@ -2,7 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { aggregate, loadEventsFromCodexSessions, parseDuration, resolveRange, type Event } from "./index";
+import {
+  aggregate,
+  groupWorktrees,
+  loadEventsFromCodexSessions,
+  parseDuration,
+  resolveRange,
+  resolveWorktreeRoot,
+  type Event,
+} from "./index";
 
 const ts = (iso: string): number => Date.parse(iso) / 1000;
 const ev = (iso: string, project: string, isUserPrompt = true): Event => ({
@@ -215,6 +223,63 @@ describe("loadEventsFromCodexSessions", () => {
 
     expect(loadEventsFromCodexSessions(root, { since: "2026-05-02", until: "2026-05-02", tz: "Asia/Tokyo" })).toHaveLength(1);
     expect(loadEventsFromCodexSessions(root, { since: "2026-05-02", until: "2026-05-02", tz: "UTC" })).toHaveLength(0);
+  });
+});
+
+describe("resolveWorktreeRoot", () => {
+  // These cases hit the Claude Code path layout, which resolves without touching git.
+  test("folds a Claude Code worktree into its parent repo", () => {
+    expect(resolveWorktreeRoot("/Users/me/Dev/repo/.claude/worktrees/probe-ss")).toBe("/Users/me/Dev/repo");
+  });
+
+  test("folds a subdirectory of a Claude Code worktree", () => {
+    expect(resolveWorktreeRoot("/Users/me/Dev/repo/.claude/worktrees/foo/src")).toBe("/Users/me/Dev/repo");
+  });
+
+  test("works regardless of whether the worktree still exists on disk", () => {
+    // Path is made up / removed; the layout match must not depend on git or the FS.
+    expect(resolveWorktreeRoot("/no/such/repo/.claude/worktrees/gone")).toBe("/no/such/repo");
+  });
+});
+
+describe("groupWorktrees", () => {
+  // A worktree of /repo lives at /repo-wt; both should fold into /repo.
+  const resolve = (p: string): string => (p === "/repo-wt" || p === "/repo-wt/src" ? "/repo" : p);
+
+  test("merges worktree events into the main repository", () => {
+    const events: Event[] = [ev("2026-05-01T10:00:00Z", "/repo"), ev("2026-05-01T10:01:00Z", "/repo-wt")];
+    groupWorktrees(events, resolve);
+    expect(events.map((e) => e.project)).toEqual(["/repo", "/repo"]);
+  });
+
+  test("leaves non-worktree paths untouched", () => {
+    const events: Event[] = [ev("2026-05-01T10:00:00Z", "/other")];
+    groupWorktrees(events, resolve);
+    expect(events[0]!.project).toBe("/other");
+  });
+
+  test("resolves each unique path only once", () => {
+    const seen: string[] = [];
+    const counting = (p: string): string => {
+      seen.push(p);
+      return p;
+    };
+    const events: Event[] = [
+      ev("2026-05-01T10:00:00Z", "/repo-wt"),
+      ev("2026-05-01T10:01:00Z", "/repo-wt"),
+      ev("2026-05-01T10:02:00Z", "/repo-wt"),
+    ];
+    groupWorktrees(events, counting);
+    expect(seen).toEqual(["/repo-wt"]);
+  });
+
+  test("after grouping, aggregate combines the merged project", () => {
+    const events: Event[] = [ev("2026-05-01T10:00:00Z", "/repo"), ev("2026-05-01T10:00:30Z", "/repo-wt")];
+    groupWorktrees(events, resolve);
+    const rows = aggregate(events, 600, 60, "UTC");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.project).toBe("/repo");
+    expect(rows[0]!.seconds).toBe(30 + 60);
   });
 });
 

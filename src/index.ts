@@ -1,6 +1,7 @@
 import { readFileSync, existsSync, readdirSync, statSync, realpathSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import pc from "picocolors";
@@ -203,6 +204,60 @@ export function loadEventsFromCodexSessions(
   return out;
 }
 
+// Claude Code creates worktrees at `<repo>/.claude/worktrees/<name>`.
+const CLAUDE_WORKTREE_MARKER = "/.claude/worktrees/";
+
+/**
+ * Resolve a session cwd to its canonical project path, merging git worktrees
+ * into their main repository root.
+ *
+ * First match Claude Code's `<repo>/.claude/worktrees/<name>` layout by path,
+ * so the worktree folds into `<repo>` even after it has been removed from disk
+ * (git can no longer resolve a directory that is gone). Otherwise ask git: a
+ * linked worktree has a per-worktree git dir (`.git/worktrees/<name>`) that
+ * differs from the shared common dir (`<main>/.git`), so we map it to the
+ * directory holding that common dir. Returns the input unchanged when the path
+ * is not a worktree, is the main worktree (or a subdirectory of it), or is a
+ * non-Claude worktree that no longer exists on disk.
+ */
+export function resolveWorktreeRoot(path: string): string {
+  const marker = path.indexOf(CLAUDE_WORKTREE_MARKER);
+  if (marker !== -1) return path.slice(0, marker);
+
+  let out: string;
+  try {
+    out = execFileSync(
+      "git",
+      ["-C", path, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+  } catch {
+    return path;
+  }
+  const [gitDir, commonDir] = out.split("\n").map((s) => s.trim());
+  if (!gitDir || !commonDir || gitDir === commonDir) return path;
+  return dirname(commonDir);
+}
+
+/**
+ * Rewrite each event's project to its canonical repository root, so linked
+ * worktree sessions are attributed to the main repository. `resolve` is
+ * injected for testability; results are cached per unique path to avoid
+ * spawning git once per event.
+ */
+export function groupWorktrees(events: Event[], resolve: (p: string) => string = resolveWorktreeRoot): Event[] {
+  const cache = new Map<string, string>();
+  for (const e of events) {
+    let root = cache.get(e.project);
+    if (root === undefined) {
+      root = resolve(e.project);
+      cache.set(e.project, root);
+    }
+    e.project = root;
+  }
+  return events;
+}
+
 function dateKey(ts: number, tz: string): string {
   // YYYY-MM-DD in given timezone
   return new Date(ts * 1000).toLocaleDateString("en-CA", { timeZone: tz });
@@ -383,6 +438,7 @@ function main() {
     .option("--last-month", "last month")
     .option("--project <pattern>", "filter by substring of project path")
     .option("--here", "filter to the current working directory's project")
+    .option("--no-group-worktrees", "keep git worktree sessions separate instead of merging them into their main repository")
     .option("--idle <dur>", "idle threshold (e.g. 600, 10m, 1h)", "10m")
     .option("--tail <dur>", "tail seconds added per prompt (e.g. 60, 1m)", "1m")
     .option("--total", "skip daily breakdown, project totals only")
@@ -407,6 +463,7 @@ function main() {
     lastMonth?: boolean;
     project?: string;
     here?: boolean;
+    groupWorktrees: boolean;
     idle: string;
     tail: string;
     total?: boolean;
@@ -447,12 +504,13 @@ function main() {
     events.push(...loadEventsFromCodexSessions(o.codexSessionsDir, { since, until, tz: o.tz }));
   }
   events.sort((a, b) => a.ts - b.ts);
+  if (o.groupWorktrees) groupWorktrees(events);
   if (o.project) {
     const needle = o.project;
     events = events.filter((e) => e.project.includes(needle));
   }
   if (o.here) {
-    const cwd = process.cwd();
+    const cwd = o.groupWorktrees ? resolveWorktreeRoot(process.cwd()) : process.cwd();
     let best: string | null = null;
     for (const e of events) {
       if (e.project === cwd || cwd.startsWith(e.project + "/")) {

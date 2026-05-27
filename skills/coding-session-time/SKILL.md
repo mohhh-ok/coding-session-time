@@ -32,7 +32,7 @@ JSON shape — array of rows, one per (date, project):
 ]
 ```
 
-`seconds` is wall-clock time attributed to that project on that date. `project` is the absolute session-start directory.
+`seconds` is wall-clock time attributed to that project on that date. `project` is the absolute session-start directory. By default, sessions from a linked git worktree are merged into the worktree's main repository, so all worktrees of one repo report under a single `project` path.
 
 ## Common flags
 
@@ -49,6 +49,7 @@ Filtering / shaping:
 - `--source all` — combine Claude Code and Codex history (skill default)
 - `--here` — filter to the current working directory's project (matches the deepest session start dir that is an ancestor of cwd). Use this when the user asks about "this project" / "this repo" / "the project I'm in".
 - `--project <substring>` — filter by substring of project path
+- `--no-group-worktrees` — keep git worktree sessions as separate projects (by default they are merged into their main repository)
 - `--total` — skip the daily breakdown, return project totals only
 - `--top <n>` — keep only top N projects in totals
 - `--idle <dur>` — idle threshold (default `10m`; accepts `600`, `10m`, `1h`)

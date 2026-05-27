@@ -64,6 +64,7 @@ claude-code-time --this-month
 claude-code-time --since 2026-04-01 --until 2026-04-30
 claude-code-time --here                     # filter to the current project (or its ancestor session)
 claude-code-time --project myrepo           # filter by substring of the project path
+claude-code-time --no-group-worktrees       # keep git worktree sessions as separate projects
 claude-code-time --idle 5m                  # treat 5+ min gaps as idle (focus-time mode)
 claude-code-time --total --top 5            # skip daily breakdown, show top 5 projects
 claude-code-time --json                     # JSON output
@@ -76,6 +77,17 @@ claude-code-time --json                     # JSON output
 Because assistant turns count as activity, long autonomous tasks (where you've sent one prompt and Claude is working for 20 minutes) are counted as work time rather than misclassified as idle.
 
 The `prompts` column still counts only user-typed prompts, not assistant or tool messages.
+
+### Git worktrees
+
+By default, sessions opened in a git worktree are attributed to the worktree's **main repository**, so all worktrees of the same repo roll up into one project.
+
+- Claude Code worktrees (`<repo>/.claude/worktrees/<name>`) are matched by path, so they fold into `<repo>` **even after the worktree has been removed** from disk.
+- Other git worktrees are detected by running `git` against the session's start directory, which requires that directory to still exist on disk (a removed non-Claude worktree stays under its original path).
+
+The main worktree and its subdirectories are left as-is. Pass `--no-group-worktrees` to keep every worktree as its own project.
+
+Merging can lower the grand total slightly versus keeping worktrees separate: events from different worktrees of the same repo on the same day re-cluster together, so overlapping idle/tail padding is counted once instead of once per worktree.
 
 Caveats:
 
@@ -94,6 +106,7 @@ Caveats:
 | `--this-month` / `--last-month` | Shortcut |
 | `--project <pattern>` | Filter by substring of the project path |
 | `--here` | Filter to the current working directory's project (matches the deepest session start dir that is an ancestor of cwd) |
+| `--no-group-worktrees` | Keep git worktree sessions separate instead of merging them into their main repository (grouping is on by default) |
 | `--idle <dur>` | Idle threshold (`600`, `10m`, `1h`) |
 | `--tail <dur>` | Tail seconds added per cluster |
 | `--total` | Skip daily breakdown, project totals only |
