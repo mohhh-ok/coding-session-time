@@ -4,7 +4,7 @@ Time analytics for local coding-agent sessions.
 
 `coding-session-time` reads session transcripts from Claude Code under `~/.claude/projects/` and from Codex under `~/.codex/sessions/`, then reports **working time** by project (the directory the session was opened in) and by day.
 
-It is published on npm as `claude-code-time`; the CLI command is also `claude-code-time`. It does not track normal desktop or web chat history.
+The supported way to use it is the **skill** (below). It was also published on npm as `claude-code-time`, but that package is now **deprecated and unmaintained** — use the skill instead. It does not track normal desktop or web chat history.
 
 This is **not** a token-usage or cost tracker — for that, see [`ccusage`](https://www.npmjs.com/package/ccusage).
 
@@ -19,7 +19,7 @@ npx skills add mohhh-ok/coding-session-time -g      # global (user scope)
 
 The skill is **self-contained**: it ships a prebuilt `claude-code-time` bundle (`bin/claude-code-time.js`) pinned to the skill's version and runs it with `node`. It does not download anything at runtime, so there is no `npx @latest` step that could pull unreviewed code. You do not need to install the CLI separately.
 
-Installing the CLI from npm (below) is optional and only needed if you want to run `claude-code-time` directly in your terminal.
+You do not need the npm package — it is deprecated (see below).
 
 ### Example prompts
 
@@ -39,15 +39,16 @@ The skill picks the right `claude-code-time` flags (`--today`, `--this-week`, `-
 
 ## Install / Usage (CLI directly)
 
-```bash
-npx claude-code-time@latest
-```
+> [!WARNING]
+> The npm package `claude-code-time` is **deprecated and unmaintained**. Use the [skill](#use-it-from-claude-code-or-codex-recommended) above, which ships its own pinned copy of the CLI. Installing from npm with `npx ...@latest` auto-executes whatever is currently latest on the registry, which is exactly the supply-chain risk this project moved away from.
 
-or
+If you still want the CLI in your terminal, build it from source rather than installing from npm:
 
 ```bash
-npm i -g claude-code-time@latest
-claude-code-time
+git clone https://github.com/mohhh-ok/coding-session-time
+cd coding-session-time
+bun install && bun run build
+node dist/index.js            # then pass any flags from the Examples below
 ```
 
 ## Examples
