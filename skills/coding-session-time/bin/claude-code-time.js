@@ -2221,6 +2221,81 @@ var {
 
 // src/index.ts
 var import_picocolors = __toESM(require_picocolors(), 1);
+// package.json
+var package_default = {
+  name: "claude-code-time",
+  version: "0.2.0",
+  description: "Time analytics for local coding-agent sessions.",
+  type: "module",
+  bin: {
+    "claude-code-time": "dist/index.js"
+  },
+  files: [
+    "dist"
+  ],
+  scripts: {
+    build: "bun run build:npm && bun run build:skill",
+    "build:npm": "bun build src/index.ts --outdir dist --target node --format esm --banner '#!/usr/bin/env node' && chmod +x dist/index.js",
+    "build:skill": "bun build src/index.ts --outfile skills/coding-session-time/bin/claude-code-time.js --target node --format esm --banner '#!/usr/bin/env node' && chmod +x skills/coding-session-time/bin/claude-code-time.js",
+    dev: "bun run src/index.ts",
+    start: "node dist/index.js",
+    test: "bun test",
+    release: "release-it",
+    prepublishOnly: "bun test && bun run build"
+  },
+  "release-it": {
+    git: {
+      commitMessage: "chore: release v${version}",
+      tagName: "v${version}",
+      requireBranch: "main",
+      requireCleanWorkingDir: true
+    },
+    github: {
+      release: true
+    },
+    npm: {
+      publish: true
+    },
+    hooks: {
+      "before:init": [
+        "bun test"
+      ],
+      "after:bump": [
+        "bun run build:skill",
+        "git add skills/coding-session-time/bin/claude-code-time.js"
+      ]
+    }
+  },
+  keywords: [
+    "claude",
+    "claude-code",
+    "codex",
+    "cli",
+    "coding-agent",
+    "session",
+    "time-tracking",
+    "analytics"
+  ],
+  license: "MIT",
+  repository: {
+    type: "git",
+    url: "git+https://github.com/mohhh-ok/coding-session-time.git"
+  },
+  engines: {
+    node: ">=18"
+  },
+  dependencies: {
+    commander: "^14.0.3",
+    picocolors: "^1.1.1"
+  },
+  devDependencies: {
+    "@types/bun": "^1.3.13",
+    "release-it": "^20.0.1",
+    typescript: "^6.0.3"
+  }
+};
+
+// src/index.ts
 var DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 var DEFAULT_CODEX_SESSIONS_DIR = join(homedir(), ".codex", "sessions");
 function parseDuration(input, fallbackUnit = "s") {
@@ -2582,7 +2657,7 @@ function printText(rows, opts) {
 }
 function main() {
   const program2 = new Command;
-  program2.name("claude-code-time").description("Time analytics for local coding-agent sessions.").version("0.1.0").option("--days <n>", "last N days", (v) => Number(v), 14).option("--since <YYYY-MM-DD>", "range start").option("--until <YYYY-MM-DD>", "range end").option("--today", "today only").option("--yesterday", "yesterday only").option("--this-week", "this week (Monday to today)").option("--last-week", "last week").option("--this-month", "this month").option("--last-month", "last month").option("--project <pattern>", "filter by substring of project path").option("--here", "filter to the current working directory's project").option("--no-group-worktrees", "keep git worktree sessions separate instead of merging them into their main repository").option("--idle <dur>", "idle threshold (e.g. 600, 10m, 1h)", "10m").option("--tail <dur>", "tail seconds added per prompt (e.g. 60, 1m)", "1m").option("--total", "skip daily breakdown, project totals only").option("--top <n>", "show only top N projects in totals", (v) => Number(v)).option("--json", "JSON output").option("--tz <tz>", "timezone (e.g. Asia/Tokyo)", process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone).option("--source <source>", "history source: claude, codex, or all", "claude").option("--codex", "shortcut for --source codex").option("--projects-dir <path>", "path to ~/.claude/projects directory", DEFAULT_PROJECTS_DIR).option("--codex-sessions-dir <path>", "path to ~/.codex/sessions directory", DEFAULT_CODEX_SESSIONS_DIR).parse(process.argv);
+  program2.name("claude-code-time").description("Time analytics for local coding-agent sessions.").version(package_default.version).option("--days <n>", "last N days", (v) => Number(v), 14).option("--since <YYYY-MM-DD>", "range start").option("--until <YYYY-MM-DD>", "range end").option("--today", "today only").option("--yesterday", "yesterday only").option("--this-week", "this week (Monday to today)").option("--last-week", "last week").option("--this-month", "this month").option("--last-month", "last month").option("--project <pattern>", "filter by substring of project path").option("--here", "filter to the current working directory's project").option("--no-group-worktrees", "keep git worktree sessions separate instead of merging them into their main repository").option("--idle <dur>", "idle threshold (e.g. 600, 10m, 1h)", "10m").option("--tail <dur>", "tail seconds added per prompt (e.g. 60, 1m)", "1m").option("--total", "skip daily breakdown, project totals only").option("--top <n>", "show only top N projects in totals", (v) => Number(v)).option("--json", "JSON output").option("--tz <tz>", "timezone (e.g. Asia/Tokyo)", process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone).option("--source <source>", "history source: claude, codex, or all", "claude").option("--codex", "shortcut for --source codex").option("--projects-dir <path>", "path to ~/.claude/projects directory", DEFAULT_PROJECTS_DIR).option("--codex-sessions-dir <path>", "path to ~/.codex/sessions directory", DEFAULT_CODEX_SESSIONS_DIR).parse(process.argv);
   const o = program2.opts();
   const source = o.codex ? "codex" : o.source;
   if (source !== "claude" && source !== "codex" && source !== "all") {

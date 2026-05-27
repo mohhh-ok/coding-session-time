@@ -5,6 +5,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import pc from "picocolors";
+import pkg from "../package.json";
 
 export type Event = { ts: number; project: string; isUserPrompt: boolean };
 export type Row = { date: string; project: string; prompts: number; seconds: number };
@@ -426,7 +427,7 @@ function main() {
   program
     .name("claude-code-time")
     .description("Time analytics for local coding-agent sessions.")
-    .version("0.1.0")
+    .version(pkg.version)
     .option("--days <n>", "last N days", (v) => Number(v), 14)
     .option("--since <YYYY-MM-DD>", "range start")
     .option("--until <YYYY-MM-DD>", "range end")
