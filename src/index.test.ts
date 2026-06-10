@@ -6,6 +6,7 @@ import {
   aggregate,
   groupWorktrees,
   loadEventsFromCodexSessions,
+  loadEventsFromProjects,
   parseDuration,
   resolveRange,
   resolveWorktreeRoot,
@@ -154,6 +155,99 @@ describe("aggregate", () => {
     const rows = aggregate(events, idle, tail, tz);
     expect(rows[0]!.seconds).toBe(40 * 30 + tail); // last - first + tail
     expect(rows[0]!.prompts).toBe(1);
+  });
+});
+
+describe("loadEventsFromProjects", () => {
+  test("includes nested subagent transcripts without counting their prompts", () => {
+    const root = mkdtempSync(join(tmpdir(), "claude-projects-"));
+    const projDir = join(root, "-Users-me-Dev-repo");
+    mkdirSync(projDir, { recursive: true });
+
+    // Main session transcript: one real user prompt + one assistant turn.
+    writeFileSync(
+      join(projDir, "s1.jsonl"),
+      [
+        {
+          type: "user",
+          cwd: "/Users/me/Dev/repo",
+          isSidechain: false,
+          timestamp: "2026-05-01T10:00:00.000Z",
+          message: { role: "user", content: "do the thing" },
+        },
+        {
+          type: "assistant",
+          cwd: "/Users/me/Dev/repo",
+          isSidechain: false,
+          timestamp: "2026-05-01T10:00:05.000Z",
+          message: { role: "assistant", content: [{ type: "text", text: "on it" }] },
+        },
+      ]
+        .map((v) => JSON.stringify(v))
+        .join("\n"),
+    );
+
+    // Subagent transcript nested at <session-id>/subagents/agent-*.jsonl. Its first
+    // `user` line is the parent's instruction replayed, not a human prompt.
+    const subagentsDir = join(projDir, "s1", "subagents");
+    mkdirSync(subagentsDir, { recursive: true });
+    writeFileSync(
+      join(subagentsDir, "agent-abc.jsonl"),
+      [
+        {
+          type: "user",
+          cwd: "/Users/me/Dev/repo",
+          isSidechain: true,
+          timestamp: "2026-05-01T10:00:10.000Z",
+          message: { role: "user", content: "investigate X" },
+        },
+        {
+          type: "assistant",
+          cwd: "/Users/me/Dev/repo",
+          isSidechain: true,
+          timestamp: "2026-05-01T10:12:00.000Z",
+          message: { role: "assistant", content: [{ type: "text", text: "found it" }] },
+        },
+      ]
+        .map((v) => JSON.stringify(v))
+        .join("\n"),
+    );
+
+    const events = loadEventsFromProjects(root);
+    expect(events).toEqual([
+      { ts: ts("2026-05-01T10:00:00.000Z"), project: "/Users/me/Dev/repo", isUserPrompt: true },
+      { ts: ts("2026-05-01T10:00:05.000Z"), project: "/Users/me/Dev/repo", isUserPrompt: false },
+      { ts: ts("2026-05-01T10:00:10.000Z"), project: "/Users/me/Dev/repo", isUserPrompt: false },
+      { ts: ts("2026-05-01T10:12:00.000Z"), project: "/Users/me/Dev/repo", isUserPrompt: false },
+    ]);
+
+    // Only the main session's user line counts as a prompt; subagent events extend
+    // the timeline (5s + 5s, then an 11m50s gap > idle swapped for tail, + final tail).
+    const rows = aggregate(events, 600, 60, "UTC");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.prompts).toBe(1);
+    expect(rows[0]!.seconds).toBe(5 + 5 + 60 + 60);
+  });
+
+  test("non-jsonl files and tool-results dirs are ignored", () => {
+    const root = mkdtempSync(join(tmpdir(), "claude-projects-"));
+    const projDir = join(root, "-Users-me-Dev-repo");
+    const toolResults = join(projDir, "s1", "tool-results");
+    mkdirSync(toolResults, { recursive: true });
+    writeFileSync(join(toolResults, "x.txt"), "not a transcript");
+    writeFileSync(
+      join(projDir, "s1.jsonl"),
+      JSON.stringify({
+        type: "user",
+        cwd: "/p",
+        timestamp: "2026-05-01T10:00:00.000Z",
+        message: { role: "user", content: "hi" },
+      }),
+    );
+
+    const events = loadEventsFromProjects(root);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.isUserPrompt).toBe(true);
   });
 });
 

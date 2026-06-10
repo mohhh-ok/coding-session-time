@@ -79,7 +79,9 @@ claude-code-time --json                     # JSON output
 
 Because assistant turns count as activity, long autonomous tasks (where you've sent one prompt and Claude is working for 20 minutes) are counted as work time rather than misclassified as idle.
 
-The `prompts` column still counts only user-typed prompts, not assistant or tool messages.
+Subagent transcripts (Task/Agent tool sidechains, stored under `<session-id>/subagents/agent-*.jsonl` next to the main session file) are read too, so time where only a delegated agent is active still counts as work time.
+
+The `prompts` column still counts only user-typed prompts, not assistant or tool messages. A subagent's first `user` line is the parent's instruction replayed (`isSidechain: true`), so it is excluded from the prompt count as well.
 
 ### Git worktrees
 

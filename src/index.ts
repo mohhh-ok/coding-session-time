@@ -52,14 +52,9 @@ export function loadEventsFromProjects(
 
   for (const sub of subs) {
     const subPath = join(dir, sub);
-    let files: string[];
-    try {
-      files = readdirSync(subPath).filter((f) => f.endsWith(".jsonl"));
-    } catch {
-      continue;
-    }
-    for (const f of files) {
-      const filePath = join(subPath, f);
+    // Session transcripts sit directly under the project dir; subagent transcripts
+    // are nested at <session-id>/subagents/agent-*.jsonl, so walk recursively.
+    for (const filePath of listJsonlFilesRecursive(subPath)) {
       try {
         const st = statSync(filePath);
         if (st.mtimeMs / 1000 < sinceCutoffSec) continue;
@@ -76,7 +71,13 @@ export function loadEventsFromProjects(
       let project: string | null = null;
       for (const line of raw.split("\n")) {
         if (!line) continue;
-        let r: { type?: string; cwd?: string; timestamp?: string; message?: { content?: unknown } };
+        let r: {
+          type?: string;
+          cwd?: string;
+          timestamp?: string;
+          isSidechain?: boolean;
+          message?: { content?: unknown };
+        };
         try {
           r = JSON.parse(line);
         } catch {
@@ -92,7 +93,9 @@ export function loadEventsFromProjects(
           if (since && d < since) continue;
           if (until && d > until) continue;
         }
-        const isUserPrompt = r.type === "user" && isRealUserPrompt(r.message?.content);
+        // Subagent transcripts replay the parent's instruction as a `user` line
+        // (isSidechain: true); count it as activity but not as a human prompt.
+        const isUserPrompt = r.type === "user" && r.isSidechain !== true && isRealUserPrompt(r.message?.content);
         sessionEvents.push({ ts, isUserPrompt });
       }
       if (!project) continue;
