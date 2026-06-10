@@ -5,7 +5,7 @@ description: Inspect local coding-agent session worktime — how long the user s
 
 # coding-session-time
 
-`coding-session-time` is powered by the `claude-code-time` CLI. It reads session transcripts from `~/.claude/projects/` for Claude Code and `~/.codex/sessions/` for Codex. It reports how much time the user spent in each project, broken down by day and as totals. Time is computed by clustering activity events (user prompts plus assistant turns and tool results) within an idle threshold (default 10m) and adding a tail per cluster (default 1m). Using assistant turns as activity signal means long autonomous tasks aren't misclassified as idle time.
+`coding-session-time` is powered by the `claude-code-time` CLI. It reads session transcripts from `~/.claude/projects/` for Claude Code and `~/.codex/sessions/` for Codex. It reports how much time the user spent in each project, broken down by day and as totals. Time is computed by clustering activity events (user prompts plus assistant turns and tool results) within an idle threshold (default 10m) and adding a tail per cluster (default 1m). Using assistant turns as activity signal means long autonomous tasks aren't misclassified as idle time. Subagent (sidechain) transcripts are included as activity too, so time where only a delegated agent is working still counts; their replayed instruction lines are excluded from the prompt count.
 
 ## When to use
 

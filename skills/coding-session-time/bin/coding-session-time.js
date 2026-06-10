@@ -2329,14 +2329,7 @@ function loadEventsFromProjects(dir, opts) {
   const until = opts?.until;
   for (const sub of subs) {
     const subPath = join(dir, sub);
-    let files;
-    try {
-      files = readdirSync(subPath).filter((f) => f.endsWith(".jsonl"));
-    } catch {
-      continue;
-    }
-    for (const f of files) {
-      const filePath = join(subPath, f);
+    for (const filePath of listJsonlFilesRecursive(subPath)) {
       try {
         const st = statSync(filePath);
         if (st.mtimeMs / 1000 < sinceCutoffSec)
@@ -2378,7 +2371,7 @@ function loadEventsFromProjects(dir, opts) {
           if (until && d > until)
             continue;
         }
-        const isUserPrompt = r.type === "user" && isRealUserPrompt(r.message?.content);
+        const isUserPrompt = r.type === "user" && r.isSidechain !== true && isRealUserPrompt(r.message?.content);
         sessionEvents.push({ ts, isUserPrompt });
       }
       if (!project)
