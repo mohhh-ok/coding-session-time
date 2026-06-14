@@ -7,6 +7,7 @@ import {
   groupWorktrees,
   loadEventsFromCodexSessions,
   loadEventsFromProjects,
+  makeDirCollector,
   parseDuration,
   resolveRange,
   resolveWorktreeRoot,
@@ -317,6 +318,98 @@ describe("loadEventsFromCodexSessions", () => {
 
     expect(loadEventsFromCodexSessions(root, { since: "2026-05-02", until: "2026-05-02", tz: "Asia/Tokyo" })).toHaveLength(1);
     expect(loadEventsFromCodexSessions(root, { since: "2026-05-02", until: "2026-05-02", tz: "UTC" })).toHaveLength(0);
+  });
+});
+
+describe("makeDirCollector", () => {
+  test("first invocation discards the default", () => {
+    const collect = makeDirCollector();
+    expect(collect("/a", ["/default"])).toEqual(["/a"]);
+  });
+
+  test("subsequent invocations append", () => {
+    const collect = makeDirCollector();
+    const after1 = collect("/a", ["/default"]);
+    const after2 = collect("/b", after1);
+    expect(after2).toEqual(["/a", "/b"]);
+  });
+
+  test("comma-separated values split into multiple entries", () => {
+    const collect = makeDirCollector();
+    expect(collect("/a,/b", ["/default"])).toEqual(["/a", "/b"]);
+  });
+
+  test("comma split trims whitespace and drops empties", () => {
+    const collect = makeDirCollector();
+    expect(collect(" /a , , /b ", ["/default"])).toEqual(["/a", "/b"]);
+  });
+
+  test("separate collectors do not share customized state", () => {
+    const a = makeDirCollector();
+    const b = makeDirCollector();
+    a("/x", ["/default-a"]);
+    expect(b("/y", ["/default-b"])).toEqual(["/y"]);
+  });
+});
+
+describe("multiple projects-dir merging", () => {
+  // Real wiring point: events from N projects-dirs are concatenated and then
+  // re-sorted before aggregate(). The same-project / close-time case must
+  // fold into one cluster instead of double-counting.
+  function setupDir(events: Array<{ ts: string; cwd: string; isUser?: boolean }>): string {
+    const root = mkdtempSync(join(tmpdir(), "claude-projects-"));
+    const projDir = join(root, "-Users-me-Dev-repo");
+    mkdirSync(projDir, { recursive: true });
+    writeFileSync(
+      join(projDir, "s.jsonl"),
+      events
+        .map((e) =>
+          JSON.stringify({
+            type: e.isUser === false ? "assistant" : "user",
+            cwd: e.cwd,
+            isSidechain: false,
+            timestamp: e.ts,
+            message: { role: e.isUser === false ? "assistant" : "user", content: "x" },
+          }),
+        )
+        .join("\n"),
+    );
+    return root;
+  }
+
+  test("same-project close-time events across two dirs fold into one cluster", () => {
+    const dirA = setupDir([{ ts: "2026-05-01T10:00:00.000Z", cwd: "/Users/me/Dev/repo" }]);
+    const dirB = setupDir([{ ts: "2026-05-01T10:00:30.000Z", cwd: "/Users/me/Dev/repo" }]);
+
+    const events: Event[] = [
+      ...loadEventsFromProjects(dirA),
+      ...loadEventsFromProjects(dirB),
+    ];
+    events.sort((a, b) => a.ts - b.ts);
+    const rows = aggregate(events, 600, 60, "UTC");
+
+    // Logical merge: 30s gap (inside idle) + 60s tail = 90s, NOT 60 + 60 = 120s.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.project).toBe("/Users/me/Dev/repo");
+    expect(rows[0]!.seconds).toBe(30 + 60);
+    expect(rows[0]!.prompts).toBe(2);
+  });
+
+  test("same-project distant events across two dirs each contribute their own tail", () => {
+    const dirA = setupDir([{ ts: "2026-05-01T10:00:00.000Z", cwd: "/Users/me/Dev/repo" }]);
+    const dirB = setupDir([{ ts: "2026-05-01T12:00:00.000Z", cwd: "/Users/me/Dev/repo" }]);
+
+    const events: Event[] = [
+      ...loadEventsFromProjects(dirA),
+      ...loadEventsFromProjects(dirB),
+    ];
+    events.sort((a, b) => a.ts - b.ts);
+    const rows = aggregate(events, 600, 60, "UTC");
+
+    // Gap (2h) > idle (10m), so each side gets a 60s tail: 60 + 60 = 120s.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.seconds).toBe(60 + 60);
+    expect(rows[0]!.prompts).toBe(2);
   });
 });
 

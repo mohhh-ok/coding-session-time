@@ -14,6 +14,27 @@ const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 const DEFAULT_CODEX_SESSIONS_DIR = join(homedir(), ".codex", "sessions");
 type Source = "claude" | "codex" | "all";
 
+/**
+ * Build a commander option collector for repeatable directory flags.
+ *
+ * Commander gives each `--flag` option a single default value; for repeatable
+ * options we want the default to apply only when the user passes nothing. The
+ * first time the user supplies the flag we discard the default and start from
+ * the user's value(s); subsequent invocations append. Each value may also be
+ * comma-separated, so `--projects-dir A,B --projects-dir C` yields `[A, B, C]`.
+ */
+export function makeDirCollector(): (value: string, previous: string[]) => string[] {
+  let customized = false;
+  return (value: string, previous: string[]): string[] => {
+    const parts = value.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!customized) {
+      customized = true;
+      return parts;
+    }
+    return [...previous, ...parts];
+  };
+}
+
 export function parseDuration(input: string, fallbackUnit: "s" | "m" = "s"): number {
   const m = input.trim().match(/^(\d+(?:\.\d+)?)([smh]?)$/i);
   if (!m) throw new Error(`invalid duration: ${input}`);
@@ -451,8 +472,18 @@ function main() {
     .option("--tz <tz>", "timezone (e.g. Asia/Tokyo)", process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone)
     .option("--source <source>", "history source: claude, codex, or all", "claude")
     .option("--codex", "shortcut for --source codex")
-    .option("--projects-dir <path>", "path to ~/.claude/projects directory", DEFAULT_PROJECTS_DIR)
-    .option("--codex-sessions-dir <path>", "path to ~/.codex/sessions directory", DEFAULT_CODEX_SESSIONS_DIR)
+    .option(
+      "--projects-dir <path>",
+      "path to a ~/.claude/projects-style directory (repeatable; comma-separated also accepted)",
+      makeDirCollector(),
+      [DEFAULT_PROJECTS_DIR],
+    )
+    .option(
+      "--codex-sessions-dir <path>",
+      "path to a ~/.codex/sessions-style directory (repeatable; comma-separated also accepted)",
+      makeDirCollector(),
+      [DEFAULT_CODEX_SESSIONS_DIR],
+    )
     .parse(process.argv);
 
   const o = program.opts<{
@@ -476,8 +507,8 @@ function main() {
     tz: string;
     source: string;
     codex?: boolean;
-    projectsDir: string;
-    codexSessionsDir: string;
+    projectsDir: string[];
+    codexSessionsDir: string[];
   }>();
 
   const source = (o.codex ? "codex" : o.source) as Source;
@@ -486,8 +517,8 @@ function main() {
     process.exit(1);
   }
   const requiredDirs = [
-    ...(source === "claude" || source === "all" ? [o.projectsDir] : []),
-    ...(source === "codex" || source === "all" ? [o.codexSessionsDir] : []),
+    ...(source === "claude" || source === "all" ? o.projectsDir : []),
+    ...(source === "codex" || source === "all" ? o.codexSessionsDir : []),
   ];
   for (const dir of requiredDirs) {
     if (!existsSync(dir)) {
@@ -502,10 +533,14 @@ function main() {
   const { since, until } = resolveRange(o, todayInTz(o.tz));
   let events: Event[] = [];
   if (source === "claude" || source === "all") {
-    events.push(...loadEventsFromProjects(o.projectsDir, { since, until, tz: o.tz }));
+    for (const dir of o.projectsDir) {
+      events.push(...loadEventsFromProjects(dir, { since, until, tz: o.tz }));
+    }
   }
   if (source === "codex" || source === "all") {
-    events.push(...loadEventsFromCodexSessions(o.codexSessionsDir, { since, until, tz: o.tz }));
+    for (const dir of o.codexSessionsDir) {
+      events.push(...loadEventsFromCodexSessions(dir, { since, until, tz: o.tz }));
+    }
   }
   events.sort((a, b) => a.ts - b.ts);
   if (o.groupWorktrees) groupWorktrees(events);

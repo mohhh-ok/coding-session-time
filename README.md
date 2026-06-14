@@ -120,8 +120,8 @@ Caveats:
 | `--tz <tz>` | Timezone (defaults to `$TZ`, then the system timezone) |
 | `--source <source>` | History source: `claude`, `codex`, or `all` (default: `claude`) |
 | `--codex` | Shortcut for `--source codex` |
-| `--projects-dir <path>` | Path to the `~/.claude/projects` directory |
-| `--codex-sessions-dir <path>` | Path to the `~/.codex/sessions` directory |
+| `--projects-dir <path>` | Path to a `~/.claude/projects`-style directory. Repeatable, and comma-separated values are accepted, so users with parallel Claude Code homes can pass `--projects-dir ~/.claude/projects --projects-dir ~/.claude2/projects`. Events from all listed dirs are merged into one timeline before idle clustering, so same-project overlapping activity isn't double-counted. |
+| `--codex-sessions-dir <path>` | Path to a `~/.codex/sessions`-style directory. Same repeatable / comma-separated semantics as `--projects-dir`. |
 
 ## Acknowledgements
 

@@ -2298,6 +2298,17 @@ var package_default = {
 // src/index.ts
 var DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 var DEFAULT_CODEX_SESSIONS_DIR = join(homedir(), ".codex", "sessions");
+function makeDirCollector() {
+  let customized = false;
+  return (value, previous) => {
+    const parts = value.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!customized) {
+      customized = true;
+      return parts;
+    }
+    return [...previous, ...parts];
+  };
+}
 function parseDuration(input, fallbackUnit = "s") {
   const m = input.trim().match(/^(\d+(?:\.\d+)?)([smh]?)$/i);
   if (!m)
@@ -2650,7 +2661,7 @@ function printText(rows, opts) {
 }
 function main() {
   const program2 = new Command;
-  program2.name("claude-code-time").description("Time analytics for local coding-agent sessions.").version(package_default.version).option("--days <n>", "last N days", (v) => Number(v), 14).option("--since <YYYY-MM-DD>", "range start").option("--until <YYYY-MM-DD>", "range end").option("--today", "today only").option("--yesterday", "yesterday only").option("--this-week", "this week (Monday to today)").option("--last-week", "last week").option("--this-month", "this month").option("--last-month", "last month").option("--project <pattern>", "filter by substring of project path").option("--here", "filter to the current working directory's project").option("--no-group-worktrees", "keep git worktree sessions separate instead of merging them into their main repository").option("--idle <dur>", "idle threshold (e.g. 600, 10m, 1h)", "10m").option("--tail <dur>", "tail seconds added per prompt (e.g. 60, 1m)", "1m").option("--total", "skip daily breakdown, project totals only").option("--top <n>", "show only top N projects in totals", (v) => Number(v)).option("--json", "JSON output").option("--tz <tz>", "timezone (e.g. Asia/Tokyo)", process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone).option("--source <source>", "history source: claude, codex, or all", "claude").option("--codex", "shortcut for --source codex").option("--projects-dir <path>", "path to ~/.claude/projects directory", DEFAULT_PROJECTS_DIR).option("--codex-sessions-dir <path>", "path to ~/.codex/sessions directory", DEFAULT_CODEX_SESSIONS_DIR).parse(process.argv);
+  program2.name("claude-code-time").description("Time analytics for local coding-agent sessions.").version(package_default.version).option("--days <n>", "last N days", (v) => Number(v), 14).option("--since <YYYY-MM-DD>", "range start").option("--until <YYYY-MM-DD>", "range end").option("--today", "today only").option("--yesterday", "yesterday only").option("--this-week", "this week (Monday to today)").option("--last-week", "last week").option("--this-month", "this month").option("--last-month", "last month").option("--project <pattern>", "filter by substring of project path").option("--here", "filter to the current working directory's project").option("--no-group-worktrees", "keep git worktree sessions separate instead of merging them into their main repository").option("--idle <dur>", "idle threshold (e.g. 600, 10m, 1h)", "10m").option("--tail <dur>", "tail seconds added per prompt (e.g. 60, 1m)", "1m").option("--total", "skip daily breakdown, project totals only").option("--top <n>", "show only top N projects in totals", (v) => Number(v)).option("--json", "JSON output").option("--tz <tz>", "timezone (e.g. Asia/Tokyo)", process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone).option("--source <source>", "history source: claude, codex, or all", "claude").option("--codex", "shortcut for --source codex").option("--projects-dir <path>", "path to a ~/.claude/projects-style directory (repeatable; comma-separated also accepted)", makeDirCollector(), [DEFAULT_PROJECTS_DIR]).option("--codex-sessions-dir <path>", "path to a ~/.codex/sessions-style directory (repeatable; comma-separated also accepted)", makeDirCollector(), [DEFAULT_CODEX_SESSIONS_DIR]).parse(process.argv);
   const o = program2.opts();
   const source = o.codex ? "codex" : o.source;
   if (source !== "claude" && source !== "codex" && source !== "all") {
@@ -2658,8 +2669,8 @@ function main() {
     process.exit(1);
   }
   const requiredDirs = [
-    ...source === "claude" || source === "all" ? [o.projectsDir] : [],
-    ...source === "codex" || source === "all" ? [o.codexSessionsDir] : []
+    ...source === "claude" || source === "all" ? o.projectsDir : [],
+    ...source === "codex" || source === "all" ? o.codexSessionsDir : []
   ];
   for (const dir of requiredDirs) {
     if (!existsSync(dir)) {
@@ -2672,10 +2683,14 @@ function main() {
   const { since, until } = resolveRange(o, todayInTz(o.tz));
   let events = [];
   if (source === "claude" || source === "all") {
-    events.push(...loadEventsFromProjects(o.projectsDir, { since, until, tz: o.tz }));
+    for (const dir of o.projectsDir) {
+      events.push(...loadEventsFromProjects(dir, { since, until, tz: o.tz }));
+    }
   }
   if (source === "codex" || source === "all") {
-    events.push(...loadEventsFromCodexSessions(o.codexSessionsDir, { since, until, tz: o.tz }));
+    for (const dir of o.codexSessionsDir) {
+      events.push(...loadEventsFromCodexSessions(dir, { since, until, tz: o.tz }));
+    }
   }
   events.sort((a, b) => a.ts - b.ts);
   if (o.groupWorktrees)
@@ -2719,6 +2734,7 @@ export {
   resolveWorktreeRoot,
   resolveRange,
   parseDuration,
+  makeDirCollector,
   loadEventsFromProjects,
   loadEventsFromCodexSessions,
   groupWorktrees,

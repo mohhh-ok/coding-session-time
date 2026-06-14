@@ -64,6 +64,10 @@ Filtering / shaping:
 - `--tail <dur>` — tail seconds added per prompt (default `1m`)
 - `--tz <tz>` — IANA timezone (defaults to `$TZ` then system timezone)
 
+Sources / multi-home:
+- `--projects-dir <path>` — Claude Code projects root. Defaults to `~/.claude/projects`. Repeatable, and comma-separated values are also accepted, so users with parallel Claude Code homes can pass `--projects-dir ~/.claude/projects --projects-dir ~/.claude2/projects` (or `--projects-dir ~/.claude/projects,~/.claude2/projects`). Events from all listed dirs are merged at the event level — same-project, close-time activity across homes folds into a single idle cluster instead of double-counting.
+- `--codex-sessions-dir <path>` — Codex sessions root. Defaults to `~/.codex/sessions`. Same repeatable / comma-separated semantics as `--projects-dir`.
+
 ## Workflow
 
 0. Check for an older installed `claude-code-time` skill before doing the time report:
@@ -105,4 +109,4 @@ User: "Daily breakdown for the last 30 days"
 
 - If the JSON array is empty, the user simply has no Claude Code activity in that range. Say so plainly; don't speculate.
 - `prompts` is a useful sanity check (very high `seconds` with very low `prompts` usually means a long idle window the algorithm couldn't split — flag it if it looks off).
-- Claude Code session transcripts live under `~/.claude/projects/`. Codex session transcripts live under `~/.codex/sessions/`. Override with `--projects-dir` or `--codex-sessions-dir` only if the user explicitly points elsewhere.
+- Claude Code session transcripts live under `~/.claude/projects/`. Codex session transcripts live under `~/.codex/sessions/`. Override with `--projects-dir` or `--codex-sessions-dir` only if the user explicitly points elsewhere. Both flags accept multiple paths (repeat the flag or pass a comma-separated list), and events from all listed dirs are merged into one timeline before clustering — so two Claude homes like `~/.claude` and `~/.claude2` aggregate correctly instead of summing as if they were independent.
