@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, readdirSync, statSync, realpathSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync, realpathSync, mkdirSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
@@ -10,9 +10,51 @@ import pkg from "../package.json";
 export type Event = { ts: number; project: string; isUserPrompt: boolean };
 export type Row = { date: string; project: string; prompts: number; seconds: number };
 
+// Per-file parse result, keyed by absolute path in FileCache. `events` is the full
+// unfiltered output of the parser for the file; since/until filtering happens at
+// query time so the cache is independent of the requested range.
+export type SessionFileData = {
+  mtimeMs: number;
+  project: string | null;
+  events: { ts: number; isUserPrompt: boolean }[];
+};
+export type FileCache = Map<string, SessionFileData>;
+
+// Bump when parser semantics change, so old on-disk caches are discarded.
+const CACHE_VERSION = 1;
+
 const DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 const DEFAULT_CODEX_SESSIONS_DIR = join(homedir(), ".codex", "sessions");
 type Source = "claude" | "codex" | "all";
+
+export function defaultCachePath(): string {
+  const base = process.env.XDG_CACHE_HOME || join(homedir(), ".cache");
+  return join(base, "coding-session-time", "cache.json");
+}
+
+export function loadFileCache(path: string): FileCache {
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    return new Map();
+  }
+  let obj: unknown;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    return new Map();
+  }
+  if (!obj || typeof obj !== "object") return new Map();
+  const o = obj as { version?: number; files?: Record<string, SessionFileData> };
+  if (o.version !== CACHE_VERSION || !o.files || typeof o.files !== "object") return new Map();
+  return new Map(Object.entries(o.files));
+}
+
+export function saveFileCache(path: string, cache: FileCache): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify({ version: CACHE_VERSION, files: Object.fromEntries(cache) }));
+}
 
 /**
  * Build a commander option collector for repeatable directory flags.
@@ -52,9 +94,48 @@ function isRealUserPrompt(content: unknown): boolean {
   return false;
 }
 
+// Pure parser: extracts every event the project format produces from a single
+// jsonl file. No since/until filtering — that is applied at the caller after the
+// cache lookup, so cached output is range-independent.
+function parseProjectJsonl(filePath: string, mtimeMs: number): SessionFileData {
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, "utf8");
+  } catch {
+    return { mtimeMs, project: null, events: [] };
+  }
+  const events: { ts: number; isUserPrompt: boolean }[] = [];
+  let project: string | null = null;
+  for (const line of raw.split("\n")) {
+    if (!line) continue;
+    let r: {
+      type?: string;
+      cwd?: string;
+      timestamp?: string;
+      isSidechain?: boolean;
+      message?: { content?: unknown };
+    };
+    try {
+      r = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (project === null && typeof r.cwd === "string") project = r.cwd;
+    if (r.type !== "user" && r.type !== "assistant") continue;
+    if (typeof r.timestamp !== "string") continue;
+    const ts = Date.parse(r.timestamp) / 1000;
+    if (!Number.isFinite(ts)) continue;
+    // Subagent transcripts replay the parent's instruction as a `user` line
+    // (isSidechain: true); count it as activity but not as a human prompt.
+    const isUserPrompt = r.type === "user" && r.isSidechain !== true && isRealUserPrompt(r.message?.content);
+    events.push({ ts, isUserPrompt });
+  }
+  return { mtimeMs, project, events };
+}
+
 export function loadEventsFromProjects(
   dir: string,
-  opts?: { since?: string; until?: string; tz?: string },
+  opts?: { since?: string; until?: string; tz?: string; cache?: FileCache },
 ): Event[] {
   const out: Event[] = [];
   let subs: string[];
@@ -70,57 +151,39 @@ export function loadEventsFromProjects(
   const tz = opts?.tz ?? "UTC";
   const since = opts?.since;
   const until = opts?.until;
+  const cache = opts?.cache;
 
   for (const sub of subs) {
     const subPath = join(dir, sub);
     // Session transcripts sit directly under the project dir; subagent transcripts
     // are nested at <session-id>/subagents/agent-*.jsonl, so walk recursively.
     for (const filePath of listJsonlFilesRecursive(subPath)) {
+      let st: ReturnType<typeof statSync>;
       try {
-        const st = statSync(filePath);
-        if (st.mtimeMs / 1000 < sinceCutoffSec) continue;
+        st = statSync(filePath);
       } catch {
         continue;
       }
-      let raw: string;
-      try {
-        raw = readFileSync(filePath, "utf8");
-      } catch {
-        continue;
+      if (st.mtimeMs / 1000 < sinceCutoffSec) continue;
+
+      let data: SessionFileData;
+      const cached = cache?.get(filePath);
+      if (cached && cached.mtimeMs === st.mtimeMs) {
+        data = cached;
+      } else {
+        data = parseProjectJsonl(filePath, st.mtimeMs);
+        cache?.set(filePath, data);
       }
-      const sessionEvents: { ts: number; isUserPrompt: boolean }[] = [];
-      let project: string | null = null;
-      for (const line of raw.split("\n")) {
-        if (!line) continue;
-        let r: {
-          type?: string;
-          cwd?: string;
-          timestamp?: string;
-          isSidechain?: boolean;
-          message?: { content?: unknown };
-        };
-        try {
-          r = JSON.parse(line);
-        } catch {
-          continue;
-        }
-        if (project === null && typeof r.cwd === "string") project = r.cwd;
-        if (r.type !== "user" && r.type !== "assistant") continue;
-        if (typeof r.timestamp !== "string") continue;
-        const ts = Date.parse(r.timestamp) / 1000;
-        if (!Number.isFinite(ts)) continue;
+      if (!data.project) continue;
+      const project = data.project;
+      for (const e of data.events) {
         if (since || until) {
-          const d = dateKey(ts, tz);
+          const d = dateKey(e.ts, tz);
           if (since && d < since) continue;
           if (until && d > until) continue;
         }
-        // Subagent transcripts replay the parent's instruction as a `user` line
-        // (isSidechain: true); count it as activity but not as a human prompt.
-        const isUserPrompt = r.type === "user" && r.isSidechain !== true && isRealUserPrompt(r.message?.content);
-        sessionEvents.push({ ts, isUserPrompt });
+        out.push({ ts: e.ts, project, isUserPrompt: e.isUserPrompt });
       }
-      if (!project) continue;
-      for (const e of sessionEvents) out.push({ ts: e.ts, project, isUserPrompt: e.isUserPrompt });
     }
   }
   out.sort((a, b) => a.ts - b.ts);
@@ -143,8 +206,11 @@ function listJsonlFilesRecursive(dir: string): string[] {
     } catch {
       continue;
     }
-    if (st.isDirectory()) out.push(...listJsonlFilesRecursive(p));
-    else if (entry.endsWith(".jsonl")) out.push(p);
+    if (st.isDirectory()) {
+      // for-loop push instead of spread: large arrays would blow the JS engine's
+      // apply-arg limit and throw `Maximum call stack size exceeded`.
+      for (const f of listJsonlFilesRecursive(p)) out.push(f);
+    } else if (entry.endsWith(".jsonl")) out.push(p);
   }
   return out;
 }
@@ -175,9 +241,42 @@ function isCodexActivityEvent(r: {
   return { include: false, isUserPrompt: false };
 }
 
+function parseCodexJsonl(filePath: string, mtimeMs: number): SessionFileData {
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, "utf8");
+  } catch {
+    return { mtimeMs, project: null, events: [] };
+  }
+  const events: { ts: number; isUserPrompt: boolean }[] = [];
+  let project: string | null = null;
+  for (const line of raw.split("\n")) {
+    if (!line) continue;
+    let r: {
+      type?: string;
+      timestamp?: string;
+      payload?: { type?: string; role?: string; cwd?: string };
+    };
+    try {
+      r = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (project === null && r.type === "session_meta" && typeof r.payload?.cwd === "string") {
+      project = r.payload.cwd;
+    }
+    if (typeof r.timestamp !== "string") continue;
+    const ts = Date.parse(r.timestamp) / 1000;
+    if (!Number.isFinite(ts)) continue;
+    const activity = isCodexActivityEvent(r);
+    if (activity.include) events.push({ ts, isUserPrompt: activity.isUserPrompt });
+  }
+  return { mtimeMs, project, events };
+}
+
 export function loadEventsFromCodexSessions(
   dir: string,
-  opts?: { since?: string; until?: string; tz?: string },
+  opts?: { since?: string; until?: string; tz?: string; cache?: FileCache },
 ): Event[] {
   const out: Event[] = [];
   const sinceCutoffSec =
@@ -185,45 +284,31 @@ export function loadEventsFromCodexSessions(
   const tz = opts?.tz ?? "UTC";
   const since = opts?.since;
   const until = opts?.until;
+  const cache = opts?.cache;
 
   for (const filePath of listJsonlFilesRecursive(dir)) {
+    let st: ReturnType<typeof statSync>;
     try {
-      const st = statSync(filePath);
-      if (st.mtimeMs / 1000 < sinceCutoffSec) continue;
+      st = statSync(filePath);
     } catch {
       continue;
     }
-    let raw: string;
-    try {
-      raw = readFileSync(filePath, "utf8");
-    } catch {
-      continue;
+    if (st.mtimeMs / 1000 < sinceCutoffSec) continue;
+
+    let data: SessionFileData;
+    const cached = cache?.get(filePath);
+    if (cached && cached.mtimeMs === st.mtimeMs) {
+      data = cached;
+    } else {
+      data = parseCodexJsonl(filePath, st.mtimeMs);
+      cache?.set(filePath, data);
     }
-    const sessionEvents: { ts: number; isUserPrompt: boolean }[] = [];
-    let project: string | null = null;
-    for (const line of raw.split("\n")) {
-      if (!line) continue;
-      let r: {
-        type?: string;
-        timestamp?: string;
-        payload?: { type?: string; role?: string; cwd?: string };
-      };
-      try {
-        r = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (project === null && r.type === "session_meta" && typeof r.payload?.cwd === "string") {
-        project = r.payload.cwd;
-      }
-      if (typeof r.timestamp !== "string") continue;
-      const ts = Date.parse(r.timestamp) / 1000;
-      if (!Number.isFinite(ts) || !inRange(ts, since, until, tz)) continue;
-      const activity = isCodexActivityEvent(r);
-      if (activity.include) sessionEvents.push({ ts, isUserPrompt: activity.isUserPrompt });
+    if (!data.project) continue;
+    const project = data.project;
+    for (const e of data.events) {
+      if (!inRange(e.ts, since, until, tz)) continue;
+      out.push({ ts: e.ts, project, isUserPrompt: e.isUserPrompt });
     }
-    if (!project) continue;
-    for (const e of sessionEvents) out.push({ ts: e.ts, project, isUserPrompt: e.isUserPrompt });
   }
   out.sort((a, b) => a.ts - b.ts);
   return out;
@@ -283,9 +368,22 @@ export function groupWorktrees(events: Event[], resolve: (p: string) => string =
   return events;
 }
 
+// `Date.prototype.toLocaleDateString` internally builds a fresh Intl formatter
+// on every call. With hundreds of thousands of events that dominates wall-clock.
+// Build one formatter per timezone and reuse it; format() runs ~10× faster.
+const _dateKeyFmts = new Map<string, Intl.DateTimeFormat>();
 function dateKey(ts: number, tz: string): string {
-  // YYYY-MM-DD in given timezone
-  return new Date(ts * 1000).toLocaleDateString("en-CA", { timeZone: tz });
+  let fmt = _dateKeyFmts.get(tz);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    _dateKeyFmts.set(tz, fmt);
+  }
+  return fmt.format(ts * 1000);
 }
 
 export function aggregate(events: Event[], idleSec: number, tailSec: number, tz: string): Row[] {
@@ -472,6 +570,7 @@ function main() {
     .option("--tz <tz>", "timezone (e.g. Asia/Tokyo)", process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone)
     .option("--source <source>", "history source: claude, codex, or all", "claude")
     .option("--codex", "shortcut for --source codex")
+    .option("--no-cache", "skip the on-disk parse cache (no read, no write)")
     .option(
       "--projects-dir <path>",
       "path to a ~/.claude/projects-style directory (repeatable; comma-separated also accepted)",
@@ -507,6 +606,7 @@ function main() {
     tz: string;
     source: string;
     codex?: boolean;
+    cache: boolean;
     projectsDir: string[];
     codexSessionsDir: string[];
   }>();
@@ -531,15 +631,26 @@ function main() {
   const tailSec = parseDuration(o.tail, "s");
 
   const { since, until } = resolveRange(o, todayInTz(o.tz));
+  const cachePath = defaultCachePath();
+  const cache: FileCache = o.cache ? loadFileCache(cachePath) : new Map();
   let events: Event[] = [];
   if (source === "claude" || source === "all") {
     for (const dir of o.projectsDir) {
-      events.push(...loadEventsFromProjects(dir, { since, until, tz: o.tz }));
+      // for-loop push instead of spread: large arrays would blow the JS engine's
+      // apply-arg limit and throw `Maximum call stack size exceeded`.
+      for (const e of loadEventsFromProjects(dir, { since, until, tz: o.tz, cache })) events.push(e);
     }
   }
   if (source === "codex" || source === "all") {
     for (const dir of o.codexSessionsDir) {
-      events.push(...loadEventsFromCodexSessions(dir, { since, until, tz: o.tz }));
+      for (const e of loadEventsFromCodexSessions(dir, { since, until, tz: o.tz, cache })) events.push(e);
+    }
+  }
+  if (o.cache) {
+    try {
+      saveFileCache(cachePath, cache);
+    } catch {
+      // Cache is a perf optimization; never let a save failure abort the run.
     }
   }
   events.sort((a, b) => a.ts - b.ts);

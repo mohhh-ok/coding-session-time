@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -7,11 +7,14 @@ import {
   groupWorktrees,
   loadEventsFromCodexSessions,
   loadEventsFromProjects,
+  loadFileCache,
   makeDirCollector,
   parseDuration,
   resolveRange,
   resolveWorktreeRoot,
+  saveFileCache,
   type Event,
+  type FileCache,
 } from "./index";
 
 const ts = (iso: string): number => Date.parse(iso) / 1000;
@@ -318,6 +321,128 @@ describe("loadEventsFromCodexSessions", () => {
 
     expect(loadEventsFromCodexSessions(root, { since: "2026-05-02", until: "2026-05-02", tz: "Asia/Tokyo" })).toHaveLength(1);
     expect(loadEventsFromCodexSessions(root, { since: "2026-05-02", until: "2026-05-02", tz: "UTC" })).toHaveLength(0);
+  });
+});
+
+describe("FileCache", () => {
+  // Pin mtime to a constant so the cache key is deterministic across writes.
+  function setupProjectFile(content: string, mtimeSec: number): { root: string; filePath: string } {
+    const root = mkdtempSync(join(tmpdir(), "claude-cache-"));
+    const projDir = join(root, "-Users-me-Dev-repo");
+    mkdirSync(projDir, { recursive: true });
+    const filePath = join(projDir, "s.jsonl");
+    writeFileSync(filePath, content);
+    utimesSync(filePath, mtimeSec, mtimeSec);
+    return { root, filePath };
+  }
+
+  const evt = (iso: string, type: "user" | "assistant" = "user") =>
+    JSON.stringify({
+      type,
+      cwd: "/Users/me/Dev/repo",
+      isSidechain: false,
+      timestamp: iso,
+      message: { role: type, content: "x" },
+    });
+
+  test("cold load populates the cache with parser output and mtime", () => {
+    const { root, filePath } = setupProjectFile(evt("2026-05-01T10:00:00.000Z"), 1_700_000_000);
+    const cache: FileCache = new Map();
+    const events = loadEventsFromProjects(root, { cache });
+
+    expect(events).toHaveLength(1);
+    expect(cache.size).toBe(1);
+    const entry = cache.get(filePath)!;
+    expect(entry.project).toBe("/Users/me/Dev/repo");
+    expect(entry.events).toHaveLength(1);
+    expect(entry.mtimeMs).toBe(statSync(filePath).mtimeMs);
+  });
+
+  test("cache hit returns stale events when mtime matches but content changed", () => {
+    // Content swap + mtime restore: proves we skip parsing on mtime match. We
+    // would never want this in production; it's the cleanest way to verify
+    // the cache short-circuits the parser.
+    const { root, filePath } = setupProjectFile(evt("2026-05-01T10:00:00.000Z"), 1_700_000_000);
+    const cache: FileCache = new Map();
+    loadEventsFromProjects(root, { cache });
+
+    writeFileSync(filePath, evt("2026-05-01T10:00:00.000Z") + "\n" + evt("2026-05-01T10:05:00.000Z", "assistant"));
+    utimesSync(filePath, 1_700_000_000, 1_700_000_000);
+
+    const events = loadEventsFromProjects(root, { cache });
+    expect(events).toHaveLength(1);
+  });
+
+  test("cache miss re-parses and overwrites the entry when mtime changes", () => {
+    const { root, filePath } = setupProjectFile(evt("2026-05-01T10:00:00.000Z"), 1_700_000_000);
+    const cache: FileCache = new Map();
+    loadEventsFromProjects(root, { cache });
+
+    writeFileSync(filePath, evt("2026-05-01T10:00:00.000Z") + "\n" + evt("2026-05-01T10:05:00.000Z", "assistant"));
+    utimesSync(filePath, 1_700_000_100, 1_700_000_100); // bumped mtime
+
+    const events = loadEventsFromProjects(root, { cache });
+    expect(events).toHaveLength(2);
+    expect(cache.get(filePath)!.events).toHaveLength(2);
+  });
+
+  test("range filter still applies on top of cached events", () => {
+    // mtime has to land within the since-cutoff window (24h before `since`),
+    // otherwise the file is skipped before the cache is even consulted.
+    const mtime = Date.parse("2026-05-03T10:00:00.000Z") / 1000;
+    const { root } = setupProjectFile(
+      [evt("2026-05-01T10:00:00.000Z"), evt("2026-05-03T10:00:00.000Z", "assistant")].join("\n"),
+      mtime,
+    );
+    const cache: FileCache = new Map();
+    loadEventsFromProjects(root, { cache });
+    // Cache stores both events; querying a narrower range filters at the caller, not at parse time.
+    expect(cache.get([...cache.keys()][0]!)!.events).toHaveLength(2);
+    const narrow = loadEventsFromProjects(root, { cache, since: "2026-05-01", until: "2026-05-01", tz: "UTC" });
+    expect(narrow).toHaveLength(1);
+  });
+
+  test("save and load round-trip", () => {
+    const { root, filePath } = setupProjectFile(evt("2026-05-01T10:00:00.000Z"), 1_700_000_000);
+    const cache: FileCache = new Map();
+    loadEventsFromProjects(root, { cache });
+
+    const cachePath = join(mkdtempSync(join(tmpdir(), "cache-store-")), "c.json");
+    saveFileCache(cachePath, cache);
+    const restored = loadFileCache(cachePath);
+    expect(restored.get(filePath)).toEqual(cache.get(filePath)!);
+  });
+
+  test("loadFileCache returns empty map on missing / corrupt / wrong-version file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cache-bad-"));
+    expect(loadFileCache(join(dir, "nope.json")).size).toBe(0);
+
+    const corruptPath = join(dir, "corrupt.json");
+    writeFileSync(corruptPath, "{not json");
+    expect(loadFileCache(corruptPath).size).toBe(0);
+
+    const wrongVersionPath = join(dir, "wrong.json");
+    writeFileSync(wrongVersionPath, JSON.stringify({ version: 999, files: {} }));
+    expect(loadFileCache(wrongVersionPath).size).toBe(0);
+  });
+
+  test("codex loader uses the same cache map without collision", () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-cache-"));
+    mkdirSync(root, { recursive: true });
+    const filePath = join(root, "rollout.jsonl");
+    writeFileSync(
+      filePath,
+      [
+        JSON.stringify({ timestamp: "2026-05-01T10:00:00.000Z", type: "session_meta", payload: { cwd: "/p" } }),
+        JSON.stringify({ timestamp: "2026-05-01T10:00:01.000Z", type: "event_msg", payload: { type: "user_message" } }),
+      ].join("\n"),
+    );
+    utimesSync(filePath, 1_700_000_000, 1_700_000_000);
+
+    const cache: FileCache = new Map();
+    const events = loadEventsFromCodexSessions(root, { cache });
+    expect(events).toHaveLength(1);
+    expect(cache.get(filePath)!.project).toBe("/p");
   });
 });
 

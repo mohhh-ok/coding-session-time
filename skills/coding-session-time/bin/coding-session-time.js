@@ -1005,7 +1005,7 @@ Expecting one of '${allowedValues.join("', '")}'`);
         this._exitCallback = (err) => {
           if (err.code !== "commander.executeSubCommandAsync") {
             throw err;
-          } else {}
+          }
         };
       }
       return this;
@@ -2197,7 +2197,7 @@ var require_picocolors = __commonJS((exports, module) => {
 });
 
 // src/index.ts
-import { readFileSync, existsSync, readdirSync, statSync, realpathSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync, realpathSync, mkdirSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
@@ -2296,8 +2296,37 @@ var package_default = {
 };
 
 // src/index.ts
+var CACHE_VERSION = 1;
 var DEFAULT_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 var DEFAULT_CODEX_SESSIONS_DIR = join(homedir(), ".codex", "sessions");
+function defaultCachePath() {
+  const base = process.env.XDG_CACHE_HOME || join(homedir(), ".cache");
+  return join(base, "coding-session-time", "cache.json");
+}
+function loadFileCache(path) {
+  let raw;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    return new Map;
+  }
+  let obj;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    return new Map;
+  }
+  if (!obj || typeof obj !== "object")
+    return new Map;
+  const o = obj;
+  if (o.version !== CACHE_VERSION || !o.files || typeof o.files !== "object")
+    return new Map;
+  return new Map(Object.entries(o.files));
+}
+function saveFileCache(path, cache) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify({ version: CACHE_VERSION, files: Object.fromEntries(cache) }));
+}
 function makeDirCollector() {
   let customized = false;
   return (value, previous) => {
@@ -2326,6 +2355,39 @@ function isRealUserPrompt(content) {
   }
   return false;
 }
+function parseProjectJsonl(filePath, mtimeMs) {
+  let raw;
+  try {
+    raw = readFileSync(filePath, "utf8");
+  } catch {
+    return { mtimeMs, project: null, events: [] };
+  }
+  const events = [];
+  let project = null;
+  for (const line of raw.split(`
+`)) {
+    if (!line)
+      continue;
+    let r;
+    try {
+      r = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (project === null && typeof r.cwd === "string")
+      project = r.cwd;
+    if (r.type !== "user" && r.type !== "assistant")
+      continue;
+    if (typeof r.timestamp !== "string")
+      continue;
+    const ts = Date.parse(r.timestamp) / 1000;
+    if (!Number.isFinite(ts))
+      continue;
+    const isUserPrompt = r.type === "user" && r.isSidechain !== true && isRealUserPrompt(r.message?.content);
+    events.push({ ts, isUserPrompt });
+  }
+  return { mtimeMs, project, events };
+}
 function loadEventsFromProjects(dir, opts) {
   const out = [];
   let subs;
@@ -2338,57 +2400,39 @@ function loadEventsFromProjects(dir, opts) {
   const tz = opts?.tz ?? "UTC";
   const since = opts?.since;
   const until = opts?.until;
+  const cache = opts?.cache;
   for (const sub of subs) {
     const subPath = join(dir, sub);
     for (const filePath of listJsonlFilesRecursive(subPath)) {
+      let st;
       try {
-        const st = statSync(filePath);
-        if (st.mtimeMs / 1000 < sinceCutoffSec)
-          continue;
+        st = statSync(filePath);
       } catch {
         continue;
       }
-      let raw;
-      try {
-        raw = readFileSync(filePath, "utf8");
-      } catch {
+      if (st.mtimeMs / 1000 < sinceCutoffSec)
         continue;
+      let data;
+      const cached = cache?.get(filePath);
+      if (cached && cached.mtimeMs === st.mtimeMs) {
+        data = cached;
+      } else {
+        data = parseProjectJsonl(filePath, st.mtimeMs);
+        cache?.set(filePath, data);
       }
-      const sessionEvents = [];
-      let project = null;
-      for (const line of raw.split(`
-`)) {
-        if (!line)
-          continue;
-        let r;
-        try {
-          r = JSON.parse(line);
-        } catch {
-          continue;
-        }
-        if (project === null && typeof r.cwd === "string")
-          project = r.cwd;
-        if (r.type !== "user" && r.type !== "assistant")
-          continue;
-        if (typeof r.timestamp !== "string")
-          continue;
-        const ts = Date.parse(r.timestamp) / 1000;
-        if (!Number.isFinite(ts))
-          continue;
+      if (!data.project)
+        continue;
+      const project = data.project;
+      for (const e of data.events) {
         if (since || until) {
-          const d = dateKey(ts, tz);
+          const d = dateKey(e.ts, tz);
           if (since && d < since)
             continue;
           if (until && d > until)
             continue;
         }
-        const isUserPrompt = r.type === "user" && r.isSidechain !== true && isRealUserPrompt(r.message?.content);
-        sessionEvents.push({ ts, isUserPrompt });
-      }
-      if (!project)
-        continue;
-      for (const e of sessionEvents)
         out.push({ ts: e.ts, project, isUserPrompt: e.isUserPrompt });
+      }
     }
   }
   out.sort((a, b) => a.ts - b.ts);
@@ -2410,9 +2454,10 @@ function listJsonlFilesRecursive(dir) {
     } catch {
       continue;
     }
-    if (st.isDirectory())
-      out.push(...listJsonlFilesRecursive(p));
-    else if (entry.endsWith(".jsonl"))
+    if (st.isDirectory()) {
+      for (const f of listJsonlFilesRecursive(p))
+        out.push(f);
+    } else if (entry.endsWith(".jsonl"))
       out.push(p);
   }
   return out;
@@ -2442,54 +2487,71 @@ function isCodexActivityEvent(r) {
   }
   return { include: false, isUserPrompt: false };
 }
+function parseCodexJsonl(filePath, mtimeMs) {
+  let raw;
+  try {
+    raw = readFileSync(filePath, "utf8");
+  } catch {
+    return { mtimeMs, project: null, events: [] };
+  }
+  const events = [];
+  let project = null;
+  for (const line of raw.split(`
+`)) {
+    if (!line)
+      continue;
+    let r;
+    try {
+      r = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (project === null && r.type === "session_meta" && typeof r.payload?.cwd === "string") {
+      project = r.payload.cwd;
+    }
+    if (typeof r.timestamp !== "string")
+      continue;
+    const ts = Date.parse(r.timestamp) / 1000;
+    if (!Number.isFinite(ts))
+      continue;
+    const activity = isCodexActivityEvent(r);
+    if (activity.include)
+      events.push({ ts, isUserPrompt: activity.isUserPrompt });
+  }
+  return { mtimeMs, project, events };
+}
 function loadEventsFromCodexSessions(dir, opts) {
   const out = [];
   const sinceCutoffSec = opts?.since != null ? Date.parse(opts.since + "T00:00:00Z") / 1000 - 86400 : -Infinity;
   const tz = opts?.tz ?? "UTC";
   const since = opts?.since;
   const until = opts?.until;
+  const cache = opts?.cache;
   for (const filePath of listJsonlFilesRecursive(dir)) {
+    let st;
     try {
-      const st = statSync(filePath);
-      if (st.mtimeMs / 1000 < sinceCutoffSec)
-        continue;
+      st = statSync(filePath);
     } catch {
       continue;
     }
-    let raw;
-    try {
-      raw = readFileSync(filePath, "utf8");
-    } catch {
+    if (st.mtimeMs / 1000 < sinceCutoffSec)
       continue;
+    let data;
+    const cached = cache?.get(filePath);
+    if (cached && cached.mtimeMs === st.mtimeMs) {
+      data = cached;
+    } else {
+      data = parseCodexJsonl(filePath, st.mtimeMs);
+      cache?.set(filePath, data);
     }
-    const sessionEvents = [];
-    let project = null;
-    for (const line of raw.split(`
-`)) {
-      if (!line)
-        continue;
-      let r;
-      try {
-        r = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (project === null && r.type === "session_meta" && typeof r.payload?.cwd === "string") {
-        project = r.payload.cwd;
-      }
-      if (typeof r.timestamp !== "string")
-        continue;
-      const ts = Date.parse(r.timestamp) / 1000;
-      if (!Number.isFinite(ts) || !inRange(ts, since, until, tz))
-        continue;
-      const activity = isCodexActivityEvent(r);
-      if (activity.include)
-        sessionEvents.push({ ts, isUserPrompt: activity.isUserPrompt });
-    }
-    if (!project)
+    if (!data.project)
       continue;
-    for (const e of sessionEvents)
+    const project = data.project;
+    for (const e of data.events) {
+      if (!inRange(e.ts, since, until, tz))
+        continue;
       out.push({ ts: e.ts, project, isUserPrompt: e.isUserPrompt });
+    }
   }
   out.sort((a, b) => a.ts - b.ts);
   return out;
@@ -2523,8 +2585,19 @@ function groupWorktrees(events, resolve = resolveWorktreeRoot) {
   }
   return events;
 }
+var _dateKeyFmts = new Map;
 function dateKey(ts, tz) {
-  return new Date(ts * 1000).toLocaleDateString("en-CA", { timeZone: tz });
+  let fmt = _dateKeyFmts.get(tz);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    });
+    _dateKeyFmts.set(tz, fmt);
+  }
+  return fmt.format(ts * 1000);
 }
 function aggregate(events, idleSec, tailSec, tz) {
   const buckets = new Map;
@@ -2661,7 +2734,7 @@ function printText(rows, opts) {
 }
 function main() {
   const program2 = new Command;
-  program2.name("claude-code-time").description("Time analytics for local coding-agent sessions.").version(package_default.version).option("--days <n>", "last N days", (v) => Number(v), 14).option("--since <YYYY-MM-DD>", "range start").option("--until <YYYY-MM-DD>", "range end").option("--today", "today only").option("--yesterday", "yesterday only").option("--this-week", "this week (Monday to today)").option("--last-week", "last week").option("--this-month", "this month").option("--last-month", "last month").option("--project <pattern>", "filter by substring of project path").option("--here", "filter to the current working directory's project").option("--no-group-worktrees", "keep git worktree sessions separate instead of merging them into their main repository").option("--idle <dur>", "idle threshold (e.g. 600, 10m, 1h)", "10m").option("--tail <dur>", "tail seconds added per prompt (e.g. 60, 1m)", "1m").option("--total", "skip daily breakdown, project totals only").option("--top <n>", "show only top N projects in totals", (v) => Number(v)).option("--json", "JSON output").option("--tz <tz>", "timezone (e.g. Asia/Tokyo)", process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone).option("--source <source>", "history source: claude, codex, or all", "claude").option("--codex", "shortcut for --source codex").option("--projects-dir <path>", "path to a ~/.claude/projects-style directory (repeatable; comma-separated also accepted)", makeDirCollector(), [DEFAULT_PROJECTS_DIR]).option("--codex-sessions-dir <path>", "path to a ~/.codex/sessions-style directory (repeatable; comma-separated also accepted)", makeDirCollector(), [DEFAULT_CODEX_SESSIONS_DIR]).parse(process.argv);
+  program2.name("claude-code-time").description("Time analytics for local coding-agent sessions.").version(package_default.version).option("--days <n>", "last N days", (v) => Number(v), 14).option("--since <YYYY-MM-DD>", "range start").option("--until <YYYY-MM-DD>", "range end").option("--today", "today only").option("--yesterday", "yesterday only").option("--this-week", "this week (Monday to today)").option("--last-week", "last week").option("--this-month", "this month").option("--last-month", "last month").option("--project <pattern>", "filter by substring of project path").option("--here", "filter to the current working directory's project").option("--no-group-worktrees", "keep git worktree sessions separate instead of merging them into their main repository").option("--idle <dur>", "idle threshold (e.g. 600, 10m, 1h)", "10m").option("--tail <dur>", "tail seconds added per prompt (e.g. 60, 1m)", "1m").option("--total", "skip daily breakdown, project totals only").option("--top <n>", "show only top N projects in totals", (v) => Number(v)).option("--json", "JSON output").option("--tz <tz>", "timezone (e.g. Asia/Tokyo)", process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone).option("--source <source>", "history source: claude, codex, or all", "claude").option("--codex", "shortcut for --source codex").option("--no-cache", "skip the on-disk parse cache (no read, no write)").option("--projects-dir <path>", "path to a ~/.claude/projects-style directory (repeatable; comma-separated also accepted)", makeDirCollector(), [DEFAULT_PROJECTS_DIR]).option("--codex-sessions-dir <path>", "path to a ~/.codex/sessions-style directory (repeatable; comma-separated also accepted)", makeDirCollector(), [DEFAULT_CODEX_SESSIONS_DIR]).parse(process.argv);
   const o = program2.opts();
   const source = o.codex ? "codex" : o.source;
   if (source !== "claude" && source !== "codex" && source !== "all") {
@@ -2681,16 +2754,25 @@ function main() {
   const idleSec = parseDuration(o.idle, "s");
   const tailSec = parseDuration(o.tail, "s");
   const { since, until } = resolveRange(o, todayInTz(o.tz));
+  const cachePath = defaultCachePath();
+  const cache = o.cache ? loadFileCache(cachePath) : new Map;
   let events = [];
   if (source === "claude" || source === "all") {
     for (const dir of o.projectsDir) {
-      events.push(...loadEventsFromProjects(dir, { since, until, tz: o.tz }));
+      for (const e of loadEventsFromProjects(dir, { since, until, tz: o.tz, cache }))
+        events.push(e);
     }
   }
   if (source === "codex" || source === "all") {
     for (const dir of o.codexSessionsDir) {
-      events.push(...loadEventsFromCodexSessions(dir, { since, until, tz: o.tz }));
+      for (const e of loadEventsFromCodexSessions(dir, { since, until, tz: o.tz, cache }))
+        events.push(e);
     }
+  }
+  if (o.cache) {
+    try {
+      saveFileCache(cachePath, cache);
+    } catch {}
   }
   events.sort((a, b) => a.ts - b.ts);
   if (o.groupWorktrees)
@@ -2731,12 +2813,15 @@ function isDirectInvocation() {
 if (isDirectInvocation())
   main();
 export {
+  saveFileCache,
   resolveWorktreeRoot,
   resolveRange,
   parseDuration,
   makeDirCollector,
+  loadFileCache,
   loadEventsFromProjects,
   loadEventsFromCodexSessions,
   groupWorktrees,
+  defaultCachePath,
   aggregate
 };
