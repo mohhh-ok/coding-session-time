@@ -99,6 +99,19 @@ Caveats:
 - Interval-based, so the time spent thinking *before* the first event and working *after* the last event is not counted (tends to under-report).
 - If you walk away while Claude is running a long task, that time will still be counted as long as the assistant is generating events (tends to over-report). Lower `--idle` to push back against this; raise `--idle` to forgive shorter breaks.
 
+## Session file retention (read this before doing long-range queries)
+
+`claude-code-time` can only aggregate sessions whose `.jsonl` transcripts still exist on disk. If Claude Code has already cleaned them up, the tool has no way to recover the lost time — a query for a range that predates your retention window silently returns 0 hours, **not** an error. Long retrospectives ("how many hours did I put into `myrepo` in April?") will misreport unless you extend retention *before* the target period rolls off. There is no backup: once a transcript is deleted, the time it represented cannot be reconstructed by this tool.
+
+- Claude Code deletes session transcripts under `~/.claude/projects/` after `cleanupPeriodDays` (default: **30 days**). To keep them for long-term analysis, set a large value in `~/.claude/settings.json`:
+
+  ```json
+  { "cleanupPeriodDays": 3650 }
+  ```
+
+- **Do not set `cleanupPeriodDays: 0`.** Due to a Claude Code bug, `0` disables transcript persistence entirely instead of meaning "keep forever", so no `.jsonl` is written and this tool ends up with nothing to read. Use a large finite number (e.g. `3650`, `9999999`).
+- Codex (`~/.codex/sessions/`) has its own retention behavior that may change independently. The same "if the jsonl is gone, the time is gone" caveat applies to `--source codex` / `--source all`.
+
 ## Options
 
 | Option | Description |
